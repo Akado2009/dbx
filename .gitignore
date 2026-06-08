@@ -1,0 +1,13 @@
+# binaries
+dbx-cli
+dbx-server
+
+# go
+*.test
+*.out
+
+# docker
+.env
+
+# os
+.DS_Store

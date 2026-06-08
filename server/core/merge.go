@@ -59,9 +59,12 @@ func DiffBranch(ctx context.Context, mainConnStr string, branch *db.Branch) ([]*
 	return GetChanges(ctx, branchConnStr, branchSlot, branchLSN)
 }
 
-// BranchSlotName returns the replication slot name for a branch
-// using the same formula as CreateBranch.
+// BranchSlotName returns the replication slot name for a branch.
+// Uses stored slot_name if available, falls back to computing it.
 func BranchSlotName(branch *db.Branch) string {
+	if branch.SlotName != "" {
+		return branch.SlotName
+	}
 	return SlotName(branch.ProjectID + "-" + branch.Name)
 }
 

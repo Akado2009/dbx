@@ -103,13 +103,19 @@ func (s *Server) deleteBranch(c *gin.Context) {
 	projectID := c.Param("projectID")
 	name := c.Param("name")
 
+	project, err := s.store.GetProject(ctx, projectID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
+		return
+	}
+
 	branch, err := s.store.GetBranch(ctx, projectID, name)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "branch not found"})
 		return
 	}
 
-	if err := core.StopBranch(branch.PgPort, branch.PgDataDir); err != nil {
+	if err := core.DeleteBranch(ctx, project.ConnString, branch); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -142,10 +148,50 @@ func (s *Server) rebaseBranch(c *gin.Context) {
 	}
 
 	if len(result.Conflicts) > 0 {
+		s.store.SaveConflicts(ctx, branch.ID, result.Conflicts)
 		c.JSON(http.StatusConflict, gin.H{"conflicts": result.Conflicts})
 		return
 	}
 
+	s.store.UpdateBranchLSN(ctx, branch.ID, result.NewLSN)
+	c.JSON(http.StatusOK, gin.H{"rebased": true, "new_lsn": result.NewLSN})
+}
+
+func (s *Server) rebaseContinue(c *gin.Context) {
+	ctx := c.Request.Context()
+	projectID := c.Param("projectID")
+	name := c.Param("name")
+
+	branch, err := s.store.GetBranch(ctx, projectID, name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "branch not found"})
+		return
+	}
+	if branch.Status != "conflict" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "branch has no pending conflicts"})
+		return
+	}
+
+	// re-run rebase now that user resolved conflicts manually
+	project, err := s.store.GetProject(ctx, projectID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
+		return
+	}
+
+	result, err := core.RebaseBranch(ctx, project.ConnString, branch)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(result.Conflicts) > 0 {
+		s.store.SaveConflicts(ctx, branch.ID, result.Conflicts)
+		c.JSON(http.StatusConflict, gin.H{"conflicts": result.Conflicts})
+		return
+	}
+
+	s.store.ClearConflicts(ctx, branch.ID)
 	s.store.UpdateBranchLSN(ctx, branch.ID, result.NewLSN)
 	c.JSON(http.StatusOK, gin.H{"rebased": true, "new_lsn": result.NewLSN})
 }
@@ -172,7 +218,6 @@ func (s *Server) mergeBranch(c *gin.Context) {
 		return
 	}
 
-	core.StopBranch(branch.PgPort, branch.PgDataDir)
 	s.store.DeleteBranch(ctx, branch.ID)
 	c.JSON(http.StatusOK, gin.H{"merged": true})
 }

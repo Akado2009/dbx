@@ -133,6 +133,8 @@ var branchDiffCmd = &cobra.Command{
 	},
 }
 
+var rebaseContinue bool
+
 var branchRebaseCmd = &cobra.Command{
 	Use:   "rebase <name>",
 	Short: "Rebase branch on top of main",
@@ -141,12 +143,15 @@ var branchRebaseCmd = &cobra.Command{
 		name := args[0]
 		pid := mustProjectID()
 
-		fmt.Printf("Rebasing %s on main...\n", name)
-		resp, err := http.Post(
-			fmt.Sprintf("%s/projects/%s/branches/%s/rebase", serverURL(), pid, name),
-			"application/json",
-			nil,
-		)
+		url := fmt.Sprintf("%s/projects/%s/branches/%s/rebase", serverURL(), pid, name)
+		if rebaseContinue {
+			url += "/continue"
+			fmt.Printf("Continuing rebase of %s...\n", name)
+		} else {
+			fmt.Printf("Rebasing %s on main...\n", name)
+		}
+
+		resp, err := http.Post(url, "application/json", nil)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
@@ -166,7 +171,8 @@ var branchRebaseCmd = &cobra.Command{
 				fmt.Fprintf(os.Stderr, "    yours:  %v\n", c["your_value"])
 				fmt.Fprintln(os.Stderr)
 			}
-			fmt.Fprintln(os.Stderr, "Resolve manually and run: dbx branch rebase --continue")
+			fmt.Fprintf(os.Stderr, "Resolve manually in the branch DB, then run:\n")
+			fmt.Fprintf(os.Stderr, "  dbx branch rebase %s --continue\n", name)
 			os.Exit(1)
 		}
 
@@ -274,6 +280,7 @@ func printDiff(indent string, oldRaw, newRaw any) {
 }
 
 func init() {
+	branchRebaseCmd.Flags().BoolVar(&rebaseContinue, "continue", false, "Continue rebase after resolving conflicts")
 	branchCmd.AddCommand(
 		branchCreateCmd,
 		branchListCmd,

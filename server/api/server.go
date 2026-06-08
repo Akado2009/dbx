@@ -28,6 +28,7 @@ func (s *Server) routes() {
 	s.router.POST("/projects/:projectID/branches", s.createBranch)
 	s.router.DELETE("/projects/:projectID/branches/:name", s.deleteBranch)
 	s.router.POST("/projects/:projectID/branches/:name/rebase", s.rebaseBranch)
+	s.router.POST("/projects/:projectID/branches/:name/rebase/continue", s.rebaseContinue)
 	s.router.POST("/projects/:projectID/branches/:name/merge", s.mergeBranch)
 	s.router.GET("/projects/:projectID/branches/:name/diff", s.diffBranch)
 }

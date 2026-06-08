@@ -67,15 +67,51 @@ func CreateBranch(ctx context.Context, mainConnStr, branchID, name string, port 
 		ParentLSN: lsn,
 		PgPort:    port,
 		PgDataDir: dataDir,
+		SlotName:  branchSlot,
 		Status:    "active",
 	}, nil
 }
 
-func StopBranch(port int, dataDir string) error {
-	cmd := exec.Command("pg_ctl", "stop", "-D", dataDir, "-m", "fast")
+// DeleteBranch drops replication slots and stops the branch PG instance.
+func DeleteBranch(ctx context.Context, mainConnStr string, branch *db.Branch) error {
+	branchConnStr := fmt.Sprintf("postgresql://localhost:%d/%s?sslmode=disable",
+		branch.PgPort, pgDatabase(mainConnStr))
+
+	// drop slots from branch PG (best effort)
+	if branchConn, err := pgx.Connect(ctx, branchConnStr); err == nil {
+		branchSlot := BranchSlotName(branch)
+		DropSlot(ctx, branchConn, branchSlot)
+		branchConn.Close(ctx)
+	}
+
+	// drop main-tracking slot from main PG (best effort)
+	if mainConn, err := pgx.Connect(ctx, mainConnStr); err == nil {
+		mainSlot := SlotName("main_" + branch.ProjectID + "-" + branch.Name)
+		DropSlot(ctx, mainConn, mainSlot)
+		mainConn.Close(ctx)
+	}
+
+	return stopPostgres(branch.PgDataDir)
+}
+
+func stopPostgres(dataDir string) error {
+	var stderr bytes.Buffer
+	cmd := pgCommand("pg_ctl", "stop", "-D", dataDir, "-m", "fast")
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%w: %s", err, stderr.String())
+	}
+	// remove data dir after clean shutdown
+	return os.RemoveAll(dataDir)
+}
+
+func pgDatabase(connStr string) string {
+	cfg, err := pgx.ParseConfig(connStr)
+	if err != nil {
+		return "myapp"
+	}
+	return cfg.Database
 }
 
 func baseBackup(mainConnStr, dataDir string) error {

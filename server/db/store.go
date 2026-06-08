@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -38,10 +39,14 @@ func (s *Store) Migrate(ctx context.Context) error {
 			parent_lsn  TEXT NOT NULL,
 			pg_port     INT NOT NULL,
 			pg_data_dir TEXT NOT NULL,
+			slot_name   TEXT NOT NULL DEFAULT '',
 			status      TEXT NOT NULL DEFAULT 'active',
+			conflicts   JSONB,
 			created_at  TIMESTAMPTZ DEFAULT now(),
 			UNIQUE(project_id, name)
 		);
+		-- add slot_name column if upgrading from older schema
+		ALTER TABLE branches ADD COLUMN IF NOT EXISTS slot_name TEXT NOT NULL DEFAULT '';
 	`)
 	return err
 }
@@ -59,6 +64,7 @@ type Branch struct {
 	ParentLSN string `json:"parent_lsn"`
 	PgPort    int    `json:"pg_port"`
 	PgDataDir string `json:"pg_data_dir"`
+	SlotName  string `json:"slot_name"`
 	Status    string `json:"status"`
 }
 
@@ -97,15 +103,15 @@ func (s *Store) GetProject(ctx context.Context, id string) (*Project, error) {
 
 func (s *Store) CreateBranch(ctx context.Context, b *Branch) error {
 	return s.pool.QueryRow(ctx,
-		`INSERT INTO branches (project_id, name, parent_lsn, pg_port, pg_data_dir)
-		 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-		b.ProjectID, b.Name, b.ParentLSN, b.PgPort, b.PgDataDir,
+		`INSERT INTO branches (project_id, name, parent_lsn, pg_port, pg_data_dir, slot_name)
+		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+		b.ProjectID, b.Name, b.ParentLSN, b.PgPort, b.PgDataDir, b.SlotName,
 	).Scan(&b.ID)
 }
 
 func (s *Store) ListBranches(ctx context.Context, projectID string) ([]*Branch, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, name, parent_lsn, pg_port, pg_data_dir, status FROM branches WHERE project_id = $1`,
+		`SELECT id, name, parent_lsn, pg_port, pg_data_dir, slot_name, status FROM branches WHERE project_id = $1`,
 		projectID,
 	)
 	if err != nil {
@@ -116,7 +122,7 @@ func (s *Store) ListBranches(ctx context.Context, projectID string) ([]*Branch, 
 	var branches []*Branch
 	for rows.Next() {
 		b := &Branch{ProjectID: projectID}
-		rows.Scan(&b.ID, &b.Name, &b.ParentLSN, &b.PgPort, &b.PgDataDir, &b.Status)
+		rows.Scan(&b.ID, &b.Name, &b.ParentLSN, &b.PgPort, &b.PgDataDir, &b.SlotName, &b.Status)
 		branches = append(branches, b)
 	}
 	return branches, nil
@@ -125,9 +131,9 @@ func (s *Store) ListBranches(ctx context.Context, projectID string) ([]*Branch, 
 func (s *Store) GetBranch(ctx context.Context, projectID, name string) (*Branch, error) {
 	b := &Branch{ProjectID: projectID, Name: name}
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, parent_lsn, pg_port, pg_data_dir, status FROM branches WHERE project_id = $1 AND name = $2`,
+		`SELECT id, parent_lsn, pg_port, pg_data_dir, slot_name, status FROM branches WHERE project_id = $1 AND name = $2`,
 		projectID, name,
-	).Scan(&b.ID, &b.ParentLSN, &b.PgPort, &b.PgDataDir, &b.Status)
+	).Scan(&b.ID, &b.ParentLSN, &b.PgPort, &b.PgDataDir, &b.SlotName, &b.Status)
 	return b, err
 }
 
@@ -135,6 +141,26 @@ func (s *Store) UpdateBranchLSN(ctx context.Context, id, lsn string) error {
 	_, err := s.pool.Exec(ctx,
 		`UPDATE branches SET parent_lsn = $1 WHERE id = $2`,
 		lsn, id,
+	)
+	return err
+}
+
+func (s *Store) SaveConflicts(ctx context.Context, id string, conflicts any) error {
+	data, err := json.Marshal(conflicts)
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx,
+		`UPDATE branches SET conflicts = $1, status = 'conflict' WHERE id = $2`,
+		string(data), id,
+	)
+	return err
+}
+
+func (s *Store) ClearConflicts(ctx context.Context, id string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE branches SET conflicts = NULL, status = 'active' WHERE id = $1`,
+		id,
 	)
 	return err
 }
