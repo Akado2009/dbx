@@ -50,6 +50,7 @@ services:
       dockerfile: Dockerfile.server
     ports:
       - "7070:7070"
+      - "5433-5460:5433-5460"
     environment:
       META_DSN: postgresql://dbx:dbx@meta-db:5432/dbx?sslmode=disable
       PORT: "7070"

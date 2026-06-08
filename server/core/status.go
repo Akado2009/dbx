@@ -59,7 +59,7 @@ func BranchStatus(ctx context.Context, mainConnStr string, branch *db.Branch) (*
 		Status:        branch.Status,
 		BranchLSN:     branchLSN,
 		MainLSN:       mainLSN,
-		BehindMain:    mainLSN != branch.ParentLSN,
+		BehindMain:    len(mainChanges) > 0,
 		PendingMain:   len(mainChanges),
 		PendingBranch: len(branchChanges),
 		Conflicts:     len(conflicts),

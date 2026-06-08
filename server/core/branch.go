@@ -94,6 +94,16 @@ func DeleteBranch(ctx context.Context, mainConnStr string, branch *db.Branch) er
 	return stopPostgres(branch.PgDataDir)
 }
 
+// StopBranch stops the branch PG instance without deleting data or slots.
+// Used after merge — data is no longer needed but we don't want to clean slots twice.
+func StopBranch(branch *db.Branch) error {
+	cmd := pgCommand("pg_ctl", "stop", "-D", branch.PgDataDir, "-m", "fast")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	_ = cmd.Run() // best effort
+	return os.RemoveAll(branch.PgDataDir)
+}
+
 func stopPostgres(dataDir string) error {
 	var stderr bytes.Buffer
 	cmd := pgCommand("pg_ctl", "stop", "-D", dataDir, "-m", "fast")
@@ -115,13 +125,13 @@ func pgDatabase(connStr string) string {
 }
 
 func baseBackup(mainConnStr, dataDir string) error {
+	// remove stale data dir if exists (e.g. leftover from previous branch with same name)
+	if err := os.RemoveAll(dataDir); err != nil {
+		return fmt.Errorf("cleanup datadir: %w", err)
+	}
 	// create dir with 0700 — postgres requires this
 	if err := os.MkdirAll(dataDir, 0700); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
-	}
-	// ensure correct permissions even if dir already existed
-	if err := os.Chmod(dataDir, 0700); err != nil {
-		return fmt.Errorf("chmod: %w", err)
 	}
 
 	cfg, err := pgx.ParseConfig(mainConnStr)

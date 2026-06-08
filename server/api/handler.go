@@ -248,6 +248,8 @@ func (s *Server) mergeBranch(c *gin.Context) {
 		return
 	}
 
+	// stop branch PG so its port is freed for future branches
+	core.StopBranch(branch)
 	s.store.DeleteBranch(ctx, branch.ID)
 	c.JSON(http.StatusOK, gin.H{"merged": true})
 }
