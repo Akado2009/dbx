@@ -16,8 +16,83 @@ func (s *Server) health(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
+func (s *Server) register(c *gin.Context) {
+	var req struct {
+		Email string `json:"email" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	ctx := c.Request.Context()
+	user, err := s.store.CreateUser(ctx, req.Email)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	token, err := s.store.CreateToken(ctx, user.ID, "default")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{
+		"token": token.Token,
+		"email": user.Email,
+		"user_id": user.ID,
+	})
+}
+
+func (s *Server) login(c *gin.Context) {
+	var req struct {
+		Email string `json:"email" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	ctx := c.Request.Context()
+	user, err := s.store.GetUserByEmail(ctx, req.Email)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found — run: dbx register"})
+		return
+	}
+	token, err := s.store.CreateToken(ctx, user.ID, "cli")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"token": token.Token,
+		"email": user.Email,
+		"user_id": user.ID,
+	})
+}
+
+func (s *Server) me(c *gin.Context) {
+	ctx := c.Request.Context()
+	userID := userIDFromCtx(c)
+	tokens, _ := s.store.ListTokens(ctx, userID)
+	email, _ := c.Get(ctxUserEmail)
+	c.JSON(http.StatusOK, gin.H{
+		"user_id": userID,
+		"email":   email,
+		"tokens":  len(tokens),
+	})
+}
+
+func (s *Server) revokeToken(c *gin.Context) {
+	token := extractKey(c)
+	userID := userIDFromCtx(c)
+	if err := s.store.RevokeToken(c.Request.Context(), token, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "token revoked"})
+}
+
 func (s *Server) listProjects(c *gin.Context) {
-	projects, err := s.store.ListProjects(c.Request.Context())
+	userID := userIDFromCtx(c)
+	projects, err := s.store.ListProjects(c.Request.Context(), userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -44,7 +119,8 @@ func (s *Server) createProject(c *gin.Context) {
 		return
 	}
 
-	p, err := s.store.CreateProject(c.Request.Context(), req.Name, req.ConnectionString)
+	userID := userIDFromCtx(c)
+	p, err := s.store.CreateProject(c.Request.Context(), req.Name, req.ConnectionString, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

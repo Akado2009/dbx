@@ -19,8 +19,8 @@ type Server struct {
 func NewServer(store *db.Store) *Server {
 	r := gin.Default()
 	r.RedirectTrailingSlash = false
-	r.Use(authMiddleware())
 	s := &Server{store: store, router: r}
+	r.Use(s.authMiddleware())
 	s.routes()
 	return s
 }
@@ -41,6 +41,13 @@ func (s *Server) routes() {
 	})
 
 	s.router.GET("/health", s.health)
+
+	// auth
+	s.router.POST("/auth/register", s.register)
+	s.router.POST("/auth/login", s.login)
+	s.router.GET("/auth/me", s.me)
+	s.router.DELETE("/auth/token", s.revokeToken)
+
 	s.router.GET("/projects", s.listProjects)
 	s.router.POST("/projects", s.createProject)
 	s.router.GET("/projects/:projectID/branches", s.listBranches)

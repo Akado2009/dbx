@@ -50,7 +50,7 @@ func main() {
 
 // recoverBranches restarts all active branch PG instances on server startup.
 func recoverBranches(ctx context.Context, store *db.Store) {
-	projects, err := store.ListProjects(ctx)
+	projects, err := store.ListProjects(ctx, "") // "" = all projects (admin recovery)
 	if err != nil {
 		log.Printf("recover: list projects: %v", err)
 		return

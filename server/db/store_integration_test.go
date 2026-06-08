@@ -59,7 +59,7 @@ func TestCreateAndGetProject(t *testing.T) {
 
 	ctx := context.Background()
 
-	p, err := store.CreateProject(ctx, "my-project", "postgresql://localhost:5432/mydb")
+	p, err := store.CreateProject(ctx, "my-project", "postgresql://localhost:5432/mydb", "")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestCreateAndListBranches(t *testing.T) {
 
 	ctx := context.Background()
 
-	p, _ := store.CreateProject(ctx, "proj", "postgresql://localhost/db")
+	p, _ := store.CreateProject(ctx, "proj", "postgresql://localhost/db", "")
 
 	b := &db.Branch{
 		ProjectID: p.ID,
@@ -122,7 +122,7 @@ func TestGetBranch(t *testing.T) {
 	defer cleanup()
 
 	ctx := context.Background()
-	p, _ := store.CreateProject(ctx, "proj2", "postgresql://localhost/db2")
+	p, _ := store.CreateProject(ctx, "proj2", "postgresql://localhost/db2", "")
 
 	b := &db.Branch{
 		ProjectID: p.ID,
@@ -150,7 +150,7 @@ func TestUpdateBranchLSN(t *testing.T) {
 	defer cleanup()
 
 	ctx := context.Background()
-	p, _ := store.CreateProject(ctx, "proj3", "postgresql://localhost/db3")
+	p, _ := store.CreateProject(ctx, "proj3", "postgresql://localhost/db3", "")
 
 	b := &db.Branch{
 		ProjectID: p.ID,
@@ -176,7 +176,7 @@ func TestDeleteBranch(t *testing.T) {
 	defer cleanup()
 
 	ctx := context.Background()
-	p, _ := store.CreateProject(ctx, "proj4", "postgresql://localhost/db4")
+	p, _ := store.CreateProject(ctx, "proj4", "postgresql://localhost/db4", "")
 
 	b := &db.Branch{
 		ProjectID: p.ID,
@@ -209,7 +209,7 @@ func TestNextFreePort(t *testing.T) {
 		t.Errorf("expected 5433, got %d", port)
 	}
 
-	p, _ := store.CreateProject(ctx, "proj5", "postgresql://localhost/db5")
+	p, _ := store.CreateProject(ctx, "proj5", "postgresql://localhost/db5", "")
 	store.CreateBranch(ctx, &db.Branch{
 		ProjectID: p.ID, Name: "b1", ParentLSN: "0/1",
 		PgPort: 5433, PgDataDir: "/tmp/b1",
@@ -230,7 +230,7 @@ func TestUniqueBranchNamePerProject(t *testing.T) {
 	defer cleanup()
 
 	ctx := context.Background()
-	p, _ := store.CreateProject(ctx, "proj6", "postgresql://localhost/db6")
+	p, _ := store.CreateProject(ctx, "proj6", "postgresql://localhost/db6", "")
 
 	b := &db.Branch{
 		ProjectID: p.ID, Name: "same-name",

@@ -115,6 +115,16 @@ func newRequest(method, url string, body []byte) (*http.Request, error) {
 	return req, nil
 }
 
+// doPostNoAuth sends a POST without attaching the API key (for register/login).
+func doPostNoAuth(url string, body []byte) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return http.DefaultClient.Do(req)
+}
+
 func doGet(url string) (*http.Response, error) {
 	req, err := newRequest(http.MethodGet, url, nil)
 	if err != nil {

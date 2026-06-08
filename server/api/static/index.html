@@ -63,6 +63,14 @@
 
     .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
+    .login-screen { position: fixed; inset: 0; background: #0d1117; z-index: 200; display: flex; align-items: center; justify-content: center; }
+    .login-box { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 40px; width: 100%; max-width: 380px; }
+    .login-box h2 { font-size: 22px; font-weight: 700; color: #58a6ff; margin-bottom: 6px; }
+    .login-box p { font-size: 13px; color: #8b949e; margin-bottom: 24px; }
+    .login-box .tabs { display: flex; gap: 4px; margin-bottom: 24px; background: #0d1117; border-radius: 6px; padding: 3px; }
+    .login-box .tab { flex: 1; padding: 7px; text-align: center; font-size: 13px; border-radius: 4px; cursor: pointer; color: #8b949e; }
+    .login-box .tab.active { background: #21262d; color: #e6edf3; font-weight: 500; }
+    .login-error { color: #f85149; font-size: 12px; margin-top: 8px; min-height: 18px; }
     .modal-overlay { position: fixed; inset: 0; background: #000000aa; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; }
     .modal { background: #161b22; border: 1px solid #30363d; border-radius: 12px; width: 100%; max-width: 720px; max-height: 80vh; display: flex; flex-direction: column; }
     .modal-header { padding: 18px 24px; border-bottom: 1px solid #30363d; display: flex; align-items: center; justify-content: space-between; }
@@ -122,11 +130,36 @@
   </style>
 </head>
 <body>
+
+<!-- Login screen -->
+<div class="login-screen hidden" id="login-screen">
+  <div class="login-box">
+    <h2>dbx</h2>
+    <p>Database branching for teams</p>
+    <div class="tabs">
+      <div class="tab active" id="tab-login" onclick="switchTab('login')">Login</div>
+      <div class="tab" id="tab-register" onclick="switchTab('register')">Register</div>
+    </div>
+    <div>
+      <label class="form-label">Email</label>
+      <input class="input" type="email" id="login-email" placeholder="you@example.com" />
+      <div class="login-error" id="login-error"></div>
+      <button class="btn btn-primary" style="width:100%;margin-top:12px;justify-content:center" onclick="submitLogin()">
+        Continue →
+      </button>
+    </div>
+  </div>
+</div>
+
 <div class="app">
   <aside class="sidebar">
     <div class="sidebar-logo">
       <h1>dbx</h1>
       <span>database branching</span>
+    </div>
+    <div id="user-info" style="padding:10px 20px;border-bottom:1px solid #30363d;font-size:12px;color:#8b949e;display:flex;align-items:center;justify-content:space-between">
+      <span id="user-email">—</span>
+      <span style="cursor:pointer;color:#f85149" onclick="logout()" title="Logout">⏻</span>
     </div>
     <div class="sidebar-section">Projects</div>
     <div id="project-list"></div>
@@ -213,6 +246,44 @@
   let branches = [];
   let branchStatuses = {};
   let apiKey = localStorage.getItem('dbx_api_key') || '';
+  let loginTab = 'login';
+
+  // --- Auth UI ---
+  function switchTab(tab) {
+    loginTab = tab;
+    document.getElementById('tab-login').className = 'tab' + (tab === 'login' ? ' active' : '');
+    document.getElementById('tab-register').className = 'tab' + (tab === 'register' ? ' active' : '');
+  }
+
+  async function submitLogin() {
+    const email = document.getElementById('login-email').value.trim();
+    const errEl = document.getElementById('login-error');
+    errEl.textContent = '';
+    if (!email) { errEl.textContent = 'Enter your email'; return; }
+
+    const url = loginTab === 'register' ? '/auth/register' : '/auth/login';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json();
+    if (data.error) { errEl.textContent = data.error; return; }
+
+    apiKey = data.token;
+    localStorage.setItem('dbx_api_key', apiKey);
+    document.getElementById('login-screen').classList.add('hidden');
+    document.getElementById('user-email').textContent = data.email;
+    await loadProjects();
+  }
+
+  async function logout() {
+    if (!confirm('Log out? Your token will be revoked.')) return;
+    await apiFetch('/auth/token', { method: 'DELETE' });
+    apiKey = '';
+    localStorage.removeItem('dbx_api_key');
+    location.reload();
+  }
 
   async function apiFetch(url, opts = {}) {
     if (apiKey) {
@@ -220,16 +291,32 @@
     }
     const res = await fetch(url, opts);
     if (res.status === 401) {
-      const key = prompt('Enter DBX API key:');
-      if (!key) return res;
-      apiKey = key;
-      localStorage.setItem('dbx_api_key', key);
-      return apiFetch(url, opts); // retry
+      // show login screen
+      apiKey = '';
+      localStorage.removeItem('dbx_api_key');
+      document.getElementById('login-screen').classList.remove('hidden');
+      return res;
     }
     return res;
   }
 
-  async function init() { await loadProjects(); }
+  async function init() {
+    if (!apiKey) {
+      document.getElementById('login-screen').classList.remove('hidden');
+      return;
+    }
+    // verify token and get user info
+    const res = await fetch('/auth/me', { headers: { 'X-API-Key': apiKey } });
+    if (res.status === 401) {
+      apiKey = '';
+      localStorage.removeItem('dbx_api_key');
+      document.getElementById('login-screen').classList.remove('hidden');
+      return;
+    }
+    const me = await res.json();
+    document.getElementById('user-email').textContent = me.email || '—';
+    await loadProjects();
+  }
 
   // --- Projects ---
   async function loadProjects() {

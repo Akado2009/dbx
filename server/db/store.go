@@ -2,6 +2,8 @@ package db
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"time"
 
@@ -26,11 +28,27 @@ func (s *Store) Close() {
 
 func (s *Store) Migrate(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS users (
+			id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+			email      TEXT UNIQUE NOT NULL,
+			created_at TIMESTAMPTZ DEFAULT now()
+		);
+
+		CREATE TABLE IF NOT EXISTS api_tokens (
+			id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+			user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			token      TEXT UNIQUE NOT NULL,
+			name       TEXT NOT NULL DEFAULT 'default',
+			created_at TIMESTAMPTZ DEFAULT now()
+		);
+
 		CREATE TABLE IF NOT EXISTS projects (
 			id          TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-			name        TEXT NOT NULL UNIQUE,
+			name        TEXT NOT NULL,
 			conn_string TEXT NOT NULL,
-			created_at  TIMESTAMPTZ DEFAULT now()
+			user_id     TEXT REFERENCES users(id) ON DELETE CASCADE,
+			created_at  TIMESTAMPTZ DEFAULT now(),
+			UNIQUE(user_id, name)
 		);
 
 		CREATE TABLE IF NOT EXISTS branches (
@@ -46,19 +64,33 @@ func (s *Store) Migrate(ctx context.Context) error {
 			created_at  TIMESTAMPTZ DEFAULT now(),
 			UNIQUE(project_id, name)
 		);
-		-- add slot_name column if upgrading from older schema
+		-- migrations for existing schemas
 		ALTER TABLE branches ADD COLUMN IF NOT EXISTS slot_name TEXT NOT NULL DEFAULT '';
 		ALTER TABLE branches ADD COLUMN IF NOT EXISTS conflicts JSONB;
 		ALTER TABLE branches ADD COLUMN IF NOT EXISTS parent_branch TEXT;
 		ALTER TABLE branches ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+		ALTER TABLE projects ADD COLUMN IF NOT EXISTS user_id TEXT REFERENCES users(id) ON DELETE CASCADE;
 	`)
 	return err
+}
+
+type User struct {
+	ID    string `json:"id"`
+	Email string `json:"email"`
+}
+
+type APIToken struct {
+	ID     string `json:"id"`
+	UserID string `json:"user_id"`
+	Token  string `json:"token"`
+	Name   string `json:"name"`
 }
 
 type Project struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	ConnString string `json:"conn_string"`
+	UserID     string `json:"user_id,omitempty"`
 }
 
 type Branch struct {
@@ -74,8 +106,83 @@ type Branch struct {
 	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
 }
 
-func (s *Store) ListProjects(ctx context.Context) ([]*Project, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, name, conn_string FROM projects`)
+// --- User / Token methods ---
+
+func (s *Store) CreateUser(ctx context.Context, email string) (*User, error) {
+	u := &User{Email: email}
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO users (email) VALUES ($1) ON CONFLICT (email) DO UPDATE SET email=EXCLUDED.email RETURNING id`,
+		email,
+	).Scan(&u.ID)
+	return u, err
+}
+
+func (s *Store) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+	u := &User{Email: email}
+	err := s.pool.QueryRow(ctx, `SELECT id FROM users WHERE email = $1`, email).Scan(&u.ID)
+	return u, err
+}
+
+func (s *Store) CreateToken(ctx context.Context, userID, name string) (*APIToken, error) {
+	raw := make([]byte, 32)
+	rand.Read(raw)
+	token := "dbx_" + hex.EncodeToString(raw)
+
+	t := &APIToken{UserID: userID, Token: token, Name: name}
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO api_tokens (user_id, token, name) VALUES ($1, $2, $3) RETURNING id`,
+		userID, token, name,
+	).Scan(&t.ID)
+	return t, err
+}
+
+func (s *Store) GetUserByToken(ctx context.Context, token string) (*User, error) {
+	u := &User{}
+	err := s.pool.QueryRow(ctx,
+		`SELECT u.id, u.email FROM users u
+		 JOIN api_tokens t ON t.user_id = u.id
+		 WHERE t.token = $1`,
+		token,
+	).Scan(&u.ID, &u.Email)
+	return u, err
+}
+
+func (s *Store) RevokeToken(ctx context.Context, token, userID string) error {
+	_, err := s.pool.Exec(ctx,
+		`DELETE FROM api_tokens WHERE token = $1 AND user_id = $2`,
+		token, userID,
+	)
+	return err
+}
+
+func (s *Store) ListTokens(ctx context.Context, userID string) ([]*APIToken, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, name, created_at FROM api_tokens WHERE user_id = $1 ORDER BY created_at`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var tokens []*APIToken
+	for rows.Next() {
+		t := &APIToken{UserID: userID}
+		var createdAt time.Time
+		rows.Scan(&t.ID, &t.Name, &createdAt)
+		tokens = append(tokens, t)
+	}
+	return tokens, nil
+}
+
+// --- Project methods ---
+
+func (s *Store) ListProjects(ctx context.Context, userID string) ([]*Project, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, name, conn_string, COALESCE(user_id, '') FROM projects
+		 WHERE user_id = $1 OR user_id IS NULL
+		 ORDER BY created_at`,
+		userID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -83,17 +190,17 @@ func (s *Store) ListProjects(ctx context.Context) ([]*Project, error) {
 	var projects []*Project
 	for rows.Next() {
 		p := &Project{}
-		rows.Scan(&p.ID, &p.Name, &p.ConnString)
+		rows.Scan(&p.ID, &p.Name, &p.ConnString, &p.UserID)
 		projects = append(projects, p)
 	}
 	return projects, nil
 }
 
-func (s *Store) CreateProject(ctx context.Context, name, connString string) (*Project, error) {
-	p := &Project{Name: name, ConnString: connString}
+func (s *Store) CreateProject(ctx context.Context, name, connString, userID string) (*Project, error) {
+	p := &Project{Name: name, ConnString: connString, UserID: userID}
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO projects (name, conn_string) VALUES ($1, $2) RETURNING id`,
-		name, connString,
+		`INSERT INTO projects (name, conn_string, user_id) VALUES ($1, $2, NULLIF($3, '')) RETURNING id`,
+		name, connString, userID,
 	).Scan(&p.ID)
 	return p, err
 }
@@ -101,9 +208,9 @@ func (s *Store) CreateProject(ctx context.Context, name, connString string) (*Pr
 func (s *Store) GetProject(ctx context.Context, id string) (*Project, error) {
 	p := &Project{ID: id}
 	err := s.pool.QueryRow(ctx,
-		`SELECT name, conn_string FROM projects WHERE id = $1`,
+		`SELECT name, conn_string, COALESCE(user_id, '') FROM projects WHERE id = $1`,
 		id,
-	).Scan(&p.Name, &p.ConnString)
+	).Scan(&p.Name, &p.ConnString, &p.UserID)
 	return p, err
 }
 
