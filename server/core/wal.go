@@ -212,6 +212,39 @@ func deduplicateChanges(changes []*Change) []*Change {
 	return out
 }
 
+// MergeChangeSets merges base changes with override changes.
+// For same table+PK, override wins (replaces base entry).
+// Used for branch-from-branch diff: parent changes + own changes.
+func MergeChangeSets(base, override []*Change) []*Change {
+	type key struct {
+		table string
+		pk    any
+	}
+	// index override by table+PK
+	idx := map[key]*Change{}
+	for _, c := range override {
+		idx[key{c.Table, c.PrimaryKey}] = c
+	}
+	var out []*Change
+	for _, c := range base {
+		k := key{c.Table, c.PrimaryKey}
+		if ov, ok := idx[k]; ok {
+			out = append(out, ov) // override wins
+			delete(idx, k)
+		} else {
+			out = append(out, c)
+		}
+	}
+	// append remaining overrides (new rows not in base)
+	for _, c := range override {
+		k := key{c.Table, c.PrimaryKey}
+		if _, ok := idx[k]; ok {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 func DetectConflicts(mainChanges, branchChanges []*Change) []*Conflict {
 	// deduplicate: for same PK keep only last change
 	mainChanges = deduplicateChanges(mainChanges)

@@ -47,6 +47,8 @@ func (s *Store) Migrate(ctx context.Context) error {
 		);
 		-- add slot_name column if upgrading from older schema
 		ALTER TABLE branches ADD COLUMN IF NOT EXISTS slot_name TEXT NOT NULL DEFAULT '';
+		ALTER TABLE branches ADD COLUMN IF NOT EXISTS conflicts JSONB;
+		ALTER TABLE branches ADD COLUMN IF NOT EXISTS parent_branch TEXT;
 	`)
 	return err
 }
@@ -58,14 +60,15 @@ type Project struct {
 }
 
 type Branch struct {
-	ID        string `json:"id"`
-	ProjectID string `json:"project_id"`
-	Name      string `json:"name"`
-	ParentLSN string `json:"parent_lsn"`
-	PgPort    int    `json:"pg_port"`
-	PgDataDir string `json:"pg_data_dir"`
-	SlotName  string `json:"slot_name"`
-	Status    string `json:"status"`
+	ID           string `json:"id"`
+	ProjectID    string `json:"project_id"`
+	Name         string `json:"name"`
+	ParentLSN    string `json:"parent_lsn"`
+	ParentBranch string `json:"parent_branch"` // empty = branched from main
+	PgPort       int    `json:"pg_port"`
+	PgDataDir    string `json:"pg_data_dir"`
+	SlotName     string `json:"slot_name"`
+	Status       string `json:"status"`
 }
 
 func (s *Store) ListProjects(ctx context.Context) ([]*Project, error) {
@@ -103,15 +106,15 @@ func (s *Store) GetProject(ctx context.Context, id string) (*Project, error) {
 
 func (s *Store) CreateBranch(ctx context.Context, b *Branch) error {
 	return s.pool.QueryRow(ctx,
-		`INSERT INTO branches (project_id, name, parent_lsn, pg_port, pg_data_dir, slot_name)
-		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-		b.ProjectID, b.Name, b.ParentLSN, b.PgPort, b.PgDataDir, b.SlotName,
+		`INSERT INTO branches (project_id, name, parent_lsn, pg_port, pg_data_dir, slot_name, parent_branch)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+		b.ProjectID, b.Name, b.ParentLSN, b.PgPort, b.PgDataDir, b.SlotName, b.ParentBranch,
 	).Scan(&b.ID)
 }
 
 func (s *Store) ListBranches(ctx context.Context, projectID string) ([]*Branch, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, name, parent_lsn, pg_port, pg_data_dir, slot_name, status FROM branches WHERE project_id = $1`,
+		`SELECT id, name, parent_lsn, pg_port, pg_data_dir, slot_name, status, COALESCE(parent_branch, '') FROM branches WHERE project_id = $1`,
 		projectID,
 	)
 	if err != nil {
@@ -122,7 +125,7 @@ func (s *Store) ListBranches(ctx context.Context, projectID string) ([]*Branch, 
 	var branches []*Branch
 	for rows.Next() {
 		b := &Branch{ProjectID: projectID}
-		rows.Scan(&b.ID, &b.Name, &b.ParentLSN, &b.PgPort, &b.PgDataDir, &b.SlotName, &b.Status)
+		rows.Scan(&b.ID, &b.Name, &b.ParentLSN, &b.PgPort, &b.PgDataDir, &b.SlotName, &b.Status, &b.ParentBranch)
 		branches = append(branches, b)
 	}
 	return branches, nil
@@ -131,9 +134,9 @@ func (s *Store) ListBranches(ctx context.Context, projectID string) ([]*Branch, 
 func (s *Store) GetBranch(ctx context.Context, projectID, name string) (*Branch, error) {
 	b := &Branch{ProjectID: projectID, Name: name}
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, parent_lsn, pg_port, pg_data_dir, slot_name, status FROM branches WHERE project_id = $1 AND name = $2`,
+		`SELECT id, parent_lsn, pg_port, pg_data_dir, slot_name, status, COALESCE(parent_branch, '') FROM branches WHERE project_id = $1 AND name = $2`,
 		projectID, name,
-	).Scan(&b.ID, &b.ParentLSN, &b.PgPort, &b.PgDataDir, &b.SlotName, &b.Status)
+	).Scan(&b.ID, &b.ParentLSN, &b.PgPort, &b.PgDataDir, &b.SlotName, &b.Status, &b.ParentBranch)
 	return b, err
 }
 

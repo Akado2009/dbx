@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 
 	"github.com/akado2009/dbx/server/core"
+	"github.com/akado2009/dbx/server/db"
 	"github.com/gin-gonic/gin"
 )
 
@@ -92,6 +94,7 @@ func (s *Server) listBranches(c *gin.Context) {
 func (s *Server) createBranch(c *gin.Context) {
 	var req struct {
 		Name string `json:"name" binding:"required"`
+		From string `json:"from"` // optional: branch name to branch from (default: main)
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -107,6 +110,19 @@ func (s *Server) createBranch(c *gin.Context) {
 		return
 	}
 
+	// determine source PG — main or another branch
+	sourceConnStr := project.ConnString
+	parentBranch := ""
+	if req.From != "" {
+		fromBranch, err := s.store.GetBranch(ctx, projectID, req.From)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "source branch not found: " + req.From})
+			return
+		}
+		sourceConnStr = core.BranchConnString(project.ConnString, fromBranch.PgPort)
+		parentBranch = req.From
+	}
+
 	port, err := s.store.NextFreePort(ctx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -117,13 +133,14 @@ func (s *Server) createBranch(c *gin.Context) {
 
 	// generate a branch ID for slot naming before DB insert
 	branchID := fmt.Sprintf("%s-%s", projectID, req.Name)
-	branch, err := core.CreateBranch(ctx, project.ConnString, branchID, req.Name, port, dataDir)
+	branch, err := core.CreateBranch(ctx, project.ConnString, sourceConnStr, branchID, req.Name, port, dataDir)
 	if err != nil {
 		log.Printf("CreateBranch error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	branch.ProjectID = projectID
+	branch.ParentBranch = parentBranch
 
 	if err := s.store.CreateBranch(ctx, branch); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -275,13 +292,42 @@ func (s *Server) diffBranch(c *gin.Context) {
 		return
 	}
 
-	changes, err := core.DiffBranch(ctx, project.ConnString, branch)
+	changes, err := s.diffRecursive(ctx, project.ConnString, projectID, branch)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"changes": changes})
+}
+
+
+// diffRecursive computes diff = parent's diff merged with own changes.
+// For direct-from-main branches: just own changes.
+// For branch-from-branch: parent changes + own changes (own wins per PK).
+func (s *Server) diffRecursive(ctx context.Context, mainConnStr, projectID string, branch *db.Branch) ([]*core.Change, error) {
+	ownChanges, err := core.DiffBranch(ctx, mainConnStr, branch)
+	if err != nil {
+		return nil, err
+	}
+
+	if branch.ParentBranch == "" {
+		return ownChanges, nil
+	}
+
+	// get parent branch and its changes recursively
+	parentBranch, err := s.store.GetBranch(ctx, projectID, branch.ParentBranch)
+	if err != nil {
+		// parent deleted — just return own changes
+		return ownChanges, nil
+	}
+
+	parentChanges, err := s.diffRecursive(ctx, mainConnStr, projectID, parentBranch)
+	if err != nil {
+		return ownChanges, nil
+	}
+
+	return core.MergeChangeSets(parentChanges, ownChanges), nil
 }
 
 func (s *Server) statusBranch(c *gin.Context) {

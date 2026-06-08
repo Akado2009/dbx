@@ -18,7 +18,10 @@ import (
 //  2. pg_basebackup → copy main data to branch dataDir
 //  3. Start branch PG on given port
 //  4. Create replication slot on branch (to track branch changes)
-func CreateBranch(ctx context.Context, mainConnStr, branchID, name string, port int, dataDir string) (*db.Branch, error) {
+// CreateBranch creates a new Postgres branch via pg_basebackup.
+// sourceConnStr is the PG to copy from — either main or another branch.
+// mainConnStr is always the main PG (for slot tracking divergence from main).
+func CreateBranch(ctx context.Context, mainConnStr, sourceConnStr, branchID, name string, port int, dataDir string) (*db.Branch, error) {
 	mainConn, err := pgx.Connect(ctx, mainConnStr)
 	if err != nil {
 		return nil, fmt.Errorf("connect to main: %w", err)
@@ -32,7 +35,7 @@ func CreateBranch(ctx context.Context, mainConnStr, branchID, name string, port 
 		return nil, fmt.Errorf("create main slot: %w", err)
 	}
 
-	if err := baseBackup(mainConnStr, dataDir); err != nil {
+	if err := baseBackup(sourceConnStr, dataDir); err != nil {
 		return nil, fmt.Errorf("base backup: %w", err)
 	}
 
