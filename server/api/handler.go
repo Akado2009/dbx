@@ -19,7 +19,16 @@ func (s *Server) listProjects(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, projects)
+	type projectView struct {
+		ID               string `json:"id"`
+		Name             string `json:"name"`
+		ConnectionString string `json:"connection_string"`
+	}
+	views := make([]projectView, len(projects))
+	for i, p := range projects {
+		views[i] = projectView{ID: p.ID, Name: p.Name, ConnectionString: p.ConnString}
+	}
+	c.JSON(http.StatusOK, views)
 }
 
 func (s *Server) createProject(c *gin.Context) {

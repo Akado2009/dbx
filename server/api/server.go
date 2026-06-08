@@ -1,9 +1,15 @@
 package api
 
 import (
+	"embed"
+	"net/http"
+
 	"github.com/akado2009/dbx/server/db"
 	"github.com/gin-gonic/gin"
 )
+
+//go:embed static
+var staticFiles embed.FS
 
 type Server struct {
 	store  *db.Store
@@ -11,7 +17,9 @@ type Server struct {
 }
 
 func NewServer(store *db.Store) *Server {
-	s := &Server{store: store, router: gin.Default()}
+	r := gin.Default()
+	r.RedirectTrailingSlash = false
+	s := &Server{store: store, router: r}
 	s.routes()
 	return s
 }
@@ -21,6 +29,16 @@ func (s *Server) Run(addr string) error {
 }
 
 func (s *Server) routes() {
+	// serve web UI — read index.html directly from embed
+	s.router.GET("/", func(c *gin.Context) {
+		data, err := staticFiles.ReadFile("static/index.html")
+		if err != nil {
+			c.String(http.StatusInternalServerError, "UI not found")
+			return
+		}
+		c.Data(http.StatusOK, "text/html; charset=utf-8", data)
+	})
+
 	s.router.GET("/health", s.health)
 	s.router.GET("/projects", s.listProjects)
 	s.router.POST("/projects", s.createProject)

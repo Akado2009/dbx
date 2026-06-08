@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>dbx — database branching</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0d1117; color: #e6edf3; min-height: 100vh; }
+
+    /* layout */
+    .app { display: flex; min-height: 100vh; }
+    .sidebar { width: 240px; background: #161b22; border-right: 1px solid #30363d; padding: 20px 0; flex-shrink: 0; }
+    .main { flex: 1; padding: 32px; overflow-y: auto; }
+
+    /* sidebar */
+    .sidebar-logo { padding: 0 20px 20px; border-bottom: 1px solid #30363d; }
+    .sidebar-logo h1 { font-size: 18px; font-weight: 700; color: #58a6ff; letter-spacing: -0.5px; }
+    .sidebar-logo span { font-size: 11px; color: #8b949e; }
+    .sidebar-section { padding: 16px 20px 8px; font-size: 11px; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; }
+    .sidebar-item { display: flex; align-items: center; gap: 8px; padding: 8px 20px; cursor: pointer; font-size: 13px; color: #c9d1d9; transition: background 0.1s; }
+    .sidebar-item:hover { background: #21262d; }
+    .sidebar-item.active { background: #1f6feb22; color: #58a6ff; border-right: 2px solid #58a6ff; }
+    .sidebar-item .dot { width: 8px; height: 8px; border-radius: 50%; background: #3fb950; flex-shrink: 0; }
+
+    /* header */
+    .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+    .page-header h2 { font-size: 20px; font-weight: 600; }
+    .page-header .subtitle { font-size: 13px; color: #8b949e; margin-top: 2px; }
+
+    /* buttons */
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 6px; border: 1px solid; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.1s; text-decoration: none; }
+    .btn-primary { background: #238636; border-color: #2ea043; color: #fff; }
+    .btn-primary:hover { background: #2ea043; }
+    .btn-ghost { background: transparent; border-color: #30363d; color: #c9d1d9; }
+    .btn-ghost:hover { background: #21262d; border-color: #8b949e; }
+    .btn-danger { background: transparent; border-color: #30363d; color: #f85149; }
+    .btn-danger:hover { background: #ff000015; border-color: #f85149; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* cards */
+    .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; }
+    .card-header { padding: 14px 18px; border-bottom: 1px solid #30363d; display: flex; align-items: center; justify-content: space-between; }
+    .card-header h3 { font-size: 14px; font-weight: 600; }
+
+    /* branch table */
+    .branch-table { width: 100%; border-collapse: collapse; }
+    .branch-table th { text-align: left; padding: 10px 18px; font-size: 11px; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; background: #0d1117; }
+    .branch-table td { padding: 14px 18px; border-top: 1px solid #21262d; font-size: 13px; vertical-align: middle; }
+    .branch-table tr:hover td { background: #161b2280; }
+
+    /* badges */
+    .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 500; }
+    .badge-active { background: #1e3a1e; color: #3fb950; border: 1px solid #2ea04330; }
+    .badge-conflict { background: #3d1a1a; color: #f85149; border: 1px solid #f8514930; }
+    .badge-offline { background: #21262d; color: #8b949e; border: 1px solid #30363d; }
+
+    /* connection string */
+    .conn-string { font-family: "SF Mono", Monaco, monospace; font-size: 11px; color: #8b949e; background: #0d1117; padding: 3px 8px; border-radius: 4px; border: 1px solid #21262d; cursor: pointer; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
+    .conn-string:hover { border-color: #58a6ff; color: #58a6ff; }
+
+    /* actions */
+    .actions { display: flex; gap: 6px; }
+
+    /* modal */
+    .modal-overlay { position: fixed; inset: 0; background: #000000aa; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .modal { background: #161b22; border: 1px solid #30363d; border-radius: 12px; width: 100%; max-width: 720px; max-height: 80vh; display: flex; flex-direction: column; }
+    .modal-header { padding: 18px 24px; border-bottom: 1px solid #30363d; display: flex; align-items: center; justify-content: space-between; }
+    .modal-header h3 { font-size: 16px; font-weight: 600; }
+    .modal-close { background: none; border: none; color: #8b949e; cursor: pointer; font-size: 20px; line-height: 1; }
+    .modal-close:hover { color: #e6edf3; }
+    .modal-body { padding: 24px; overflow-y: auto; flex: 1; }
+
+    /* diff */
+    .diff-empty { color: #8b949e; font-style: italic; text-align: center; padding: 32px; }
+    .diff-change { margin-bottom: 20px; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; }
+    .diff-change-header { padding: 10px 14px; background: #0d1117; display: flex; align-items: center; gap: 8px; font-size: 12px; font-family: monospace; }
+    .diff-op { font-weight: 700; padding: 1px 6px; border-radius: 4px; font-size: 11px; }
+    .diff-op-insert { background: #1e3a1e; color: #3fb950; }
+    .diff-op-update { background: #1a2a3a; color: #58a6ff; }
+    .diff-op-delete { background: #3d1a1a; color: #f85149; }
+    .diff-table-name { color: #c9d1d9; font-weight: 600; }
+    .diff-pk { color: #8b949e; }
+    .diff-fields { padding: 10px 14px; }
+    .diff-field { display: flex; gap: 12px; padding: 3px 0; font-size: 12px; font-family: monospace; }
+    .diff-field-key { color: #8b949e; min-width: 100px; }
+    .diff-field-old { color: #f85149; text-decoration: line-through; }
+    .diff-field-new { color: #3fb950; }
+    .diff-field-val { color: #c9d1d9; }
+
+    /* status bar */
+    .status-row { display: flex; gap: 8px; align-items: center; font-size: 12px; color: #8b949e; }
+    .status-ok { color: #3fb950; }
+    .status-warn { color: #d29922; }
+    .status-err { color: #f85149; }
+
+    /* form */
+    .form-row { display: flex; gap: 10px; align-items: center; }
+    .input { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; font-size: 13px; padding: 7px 12px; outline: none; transition: border-color 0.1s; }
+    .input:focus { border-color: #58a6ff; }
+    .input::placeholder { color: #484f58; }
+
+    /* toast */
+    .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 200; display: flex; flex-direction: column; gap: 8px; }
+    .toast { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px 16px; font-size: 13px; min-width: 240px; animation: slideIn 0.2s ease; }
+    .toast-success { border-color: #2ea043; color: #3fb950; }
+    .toast-error { border-color: #f85149; color: #f85149; }
+    @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+    /* empty state */
+    .empty-state { text-align: center; padding: 64px 24px; color: #8b949e; }
+    .empty-state h3 { font-size: 16px; color: #c9d1d9; margin-bottom: 8px; }
+    .empty-state p { font-size: 13px; margin-bottom: 24px; }
+
+    /* loading */
+    .spinner { width: 16px; height: 16px; border: 2px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin 0.6s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .hidden { display: none !important; }
+    .gap-8 { gap: 8px; }
+    .flex { display: flex; }
+    .items-center { align-items: center; }
+  </style>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h1>dbx</h1>
+      <span>database branching</span>
+    </div>
+    <div class="sidebar-section">Projects</div>
+    <div id="project-list"></div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <div id="view-select-project" class="empty-state hidden">
+      <h3>Select a project</h3>
+      <p>Choose a project from the sidebar to view its branches.</p>
+    </div>
+
+    <div id="view-branches" class="hidden">
+      <div class="page-header">
+        <div>
+          <h2 id="project-name">—</h2>
+          <div class="subtitle" id="project-conn"></div>
+        </div>
+        <div class="form-row">
+          <input class="input" id="new-branch-name" placeholder="new-branch-name" style="width:180px" />
+          <button class="btn btn-primary" onclick="createBranch()">
+            + Create branch
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>Branches</h3>
+          <button class="btn btn-ghost btn-sm" onclick="loadBranches()">↺ Refresh</button>
+        </div>
+        <table class="branch-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Status</th>
+              <th>Port</th>
+              <th>Connection</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="branch-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Diff Modal -->
+<div class="modal-overlay hidden" id="diff-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="diff-modal-title">Changes</h3>
+      <button class="modal-close" onclick="closeModal('diff-modal')">×</button>
+    </div>
+    <div class="modal-body" id="diff-modal-body"></div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toast-container"></div>
+
+<script>
+  const API = '';
+  let currentProject = null;
+  let branches = [];
+
+  // --- Init ---
+  async function init() {
+    await loadProjects();
+  }
+
+  // --- Projects ---
+  async function loadProjects() {
+    const res = await fetch(`${API}/projects`);
+    const projects = await res.json();
+    const el = document.getElementById('project-list');
+
+    if (!projects || projects.length === 0) {
+      el.innerHTML = `<div class="sidebar-item" style="color:#484f58;cursor:default">No projects</div>`;
+      showView('view-select-project');
+      return;
+    }
+
+    el.innerHTML = projects.map(p => `
+      <div class="sidebar-item" id="proj-${p.id}" onclick="selectProject(${JSON.stringify(p).replace(/"/g, '&quot;')})">
+        <div class="dot"></div>
+        ${p.name}
+      </div>
+    `).join('');
+
+    // auto-select first
+    selectProject(projects[0]);
+  }
+
+  async function selectProject(p) {
+    currentProject = p;
+    document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
+    const el = document.getElementById(`proj-${p.id}`);
+    if (el) el.classList.add('active');
+
+    document.getElementById('project-name').textContent = p.name;
+    document.getElementById('project-conn').textContent = p.connection_string || '';
+    showView('view-branches');
+    await loadBranches();
+  }
+
+  // --- Branches ---
+  async function loadBranches() {
+    if (!currentProject) return;
+    const res = await fetch(`${API}/projects/${currentProject.id}/branches`);
+    branches = await res.json() || [];
+    renderBranches();
+  }
+
+  function renderBranches() {
+    const tbody = document.getElementById('branch-tbody');
+    if (!branches.length) {
+      tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state" style="padding:40px">
+        <h3>No branches yet</h3>
+        <p>Create your first branch above.</p>
+      </div></td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = branches.map(b => `
+      <tr>
+        <td><strong>${b.name}</strong></td>
+        <td>${statusBadge(b.status)}</td>
+        <td><span style="font-family:monospace;color:#8b949e">${b.pg_port}</span></td>
+        <td>
+          <span class="conn-string" onclick="copyConn('${b.connection_string}')" title="Click to copy">
+            ${b.connection_string}
+          </span>
+        </td>
+        <td>
+          <div class="actions">
+            <button class="btn btn-ghost btn-sm" onclick="showDiff('${b.name}')">Diff</button>
+            <button class="btn btn-ghost btn-sm" onclick="rebase('${b.name}')">Rebase</button>
+            <button class="btn btn-primary btn-sm" onclick="merge('${b.name}')">Merge</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteBranch('${b.name}')">Delete</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  function statusBadge(status) {
+    const map = {
+      active:   `<span class="badge badge-active">● active</span>`,
+      conflict: `<span class="badge badge-conflict">⚠ conflict</span>`,
+      offline:  `<span class="badge badge-offline">○ offline</span>`,
+    };
+    return map[status] || `<span class="badge badge-offline">${status}</span>`;
+  }
+
+  // --- Create Branch ---
+  async function createBranch() {
+    const name = document.getElementById('new-branch-name').value.trim();
+    if (!name) { toast('Enter a branch name', 'error'); return; }
+
+    toast('Creating branch…');
+    const res = await fetch(`${API}/projects/${currentProject.id}/branches`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    const data = await res.json();
+    if (data.error) { toast(data.error, 'error'); return; }
+
+    document.getElementById('new-branch-name').value = '';
+    toast(`Branch "${name}" created`, 'success');
+    await loadBranches();
+  }
+
+  // --- Diff ---
+  async function showDiff(name) {
+    document.getElementById('diff-modal-title').textContent = `diff: ${name}`;
+    document.getElementById('diff-modal-body').innerHTML = `<div class="flex items-center gap-8" style="padding:24px"><div class="spinner"></div> Loading…</div>`;
+    openModal('diff-modal');
+
+    const res = await fetch(`${API}/projects/${currentProject.id}/branches/${name}/diff`);
+    const data = await res.json();
+
+    if (data.error) {
+      document.getElementById('diff-modal-body').innerHTML = `<div class="diff-empty">${data.error}</div>`;
+      return;
+    }
+
+    const changes = data.changes || [];
+    if (!changes.length) {
+      document.getElementById('diff-modal-body').innerHTML = `<div class="diff-empty">No changes — branch is identical to main.</div>`;
+      return;
+    }
+
+    document.getElementById('diff-modal-body').innerHTML = changes.map(c => renderChange(c)).join('');
+  }
+
+  function renderChange(c) {
+    const opClass = { INSERT: 'insert', UPDATE: 'update', DELETE: 'delete' }[c.operation] || 'update';
+    const opLabel = { INSERT: '+', UPDATE: '~', DELETE: '-' }[c.operation] || '?';
+
+    let fields = '';
+    if (c.operation === 'INSERT' && c.new_row) {
+      fields = Object.entries(c.new_row).map(([k, v]) =>
+        `<div class="diff-field"><span class="diff-field-key">${k}</span><span class="diff-field-new">${v ?? 'null'}</span></div>`
+      ).join('');
+    } else if (c.operation === 'UPDATE') {
+      const oldR = c.old_row || {};
+      const newR = c.new_row || {};
+      const keys = new Set([...Object.keys(oldR), ...Object.keys(newR)]);
+      fields = [...keys].map(k => {
+        const ov = oldR[k], nv = newR[k];
+        if (String(ov) === String(nv)) {
+          return `<div class="diff-field"><span class="diff-field-key">${k}</span><span class="diff-field-val">${nv ?? 'null'}</span></div>`;
+        }
+        return `<div class="diff-field"><span class="diff-field-key">${k}</span><span class="diff-field-old">${ov ?? 'null'}</span><span style="color:#484f58">→</span><span class="diff-field-new">${nv ?? 'null'}</span></div>`;
+      }).join('');
+    } else if (c.operation === 'DELETE' && c.old_row) {
+      fields = Object.entries(c.old_row).map(([k, v]) =>
+        `<div class="diff-field"><span class="diff-field-key">${k}</span><span class="diff-field-old">${v ?? 'null'}</span></div>`
+      ).join('');
+    }
+
+    return `
+      <div class="diff-change">
+        <div class="diff-change-header">
+          <span class="diff-op diff-op-${opClass}">${opLabel} ${c.operation}</span>
+          <span class="diff-table-name">${c.table}</span>
+          <span class="diff-pk">id=${c.primary_key}</span>
+        </div>
+        <div class="diff-fields">${fields}</div>
+      </div>
+    `;
+  }
+
+  // --- Rebase ---
+  async function rebase(name) {
+    toast(`Rebasing ${name}…`);
+    const res = await fetch(`${API}/projects/${currentProject.id}/branches/${name}/rebase`, { method: 'POST' });
+    const data = await res.json();
+
+    if (data.conflicts && data.conflicts.length) {
+      toast(`${data.conflicts.length} conflict(s) detected — resolve manually then rebase --continue`, 'error');
+      await loadBranches();
+      return;
+    }
+    if (data.error) { toast(data.error, 'error'); return; }
+    toast(`${name} rebased on main`, 'success');
+    await loadBranches();
+  }
+
+  // --- Merge ---
+  async function merge(name) {
+    if (!confirm(`Merge "${name}" into main?`)) return;
+    toast(`Merging ${name}…`);
+    const res = await fetch(`${API}/projects/${currentProject.id}/branches/${name}/merge`, { method: 'POST' });
+    const data = await res.json();
+    if (data.error) { toast(data.error, 'error'); return; }
+    toast(`${name} merged into main`, 'success');
+    await loadBranches();
+  }
+
+  // --- Delete ---
+  async function deleteBranch(name) {
+    if (!confirm(`Delete branch "${name}"? This cannot be undone.`)) return;
+    toast(`Deleting ${name}…`);
+    const res = await fetch(`${API}/projects/${currentProject.id}/branches/${name}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.error) { toast(data.error, 'error'); return; }
+    toast(`${name} deleted`, 'success');
+    await loadBranches();
+  }
+
+  // --- Copy connection string ---
+  function copyConn(str) {
+    navigator.clipboard.writeText(str).then(() => toast('Copied!', 'success'));
+  }
+
+  // --- Modal ---
+  function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
+  function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') document.querySelectorAll('.modal-overlay').forEach(m => m.classList.add('hidden')); });
+
+  // --- Views ---
+  function showView(id) {
+    document.querySelectorAll('[id^="view-"]').forEach(el => el.classList.add('hidden'));
+    document.getElementById(id).classList.remove('hidden');
+  }
+
+  // --- Toast ---
+  function toast(msg, type = '') {
+    const el = document.createElement('div');
+    el.className = `toast ${type ? 'toast-' + type : ''}`;
+    el.textContent = msg;
+    document.getElementById('toast-container').appendChild(el);
+    setTimeout(() => el.remove(), 3000);
+  }
+
+  init();
+</script>
+</body>
+</html>
