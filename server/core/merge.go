@@ -68,13 +68,18 @@ func BranchSlotName(branch *db.Branch) string {
 	return SlotName(branch.ProjectID + "-" + branch.Name)
 }
 
-// branchConnString builds a connection string for a branch PG instance
+// BranchConnString builds a connection string for a branch PG instance
 // using the same user/db as main but on a different port.
-func branchConnString(mainConnStr string, port int) string {
+func BranchConnString(mainConnStr string, port int) string {
 	cfg, err := pgx.ParseConfig(mainConnStr)
 	if err != nil {
 		return fmt.Sprintf("postgresql://localhost:%d/myapp?sslmode=disable", port)
 	}
 	return fmt.Sprintf("postgresql://%s@localhost:%d/%s?sslmode=disable",
 		cfg.User, port, cfg.Database)
+}
+
+// branchConnString is the internal alias.
+func branchConnString(mainConnStr string, port int) string {
+	return BranchConnString(mainConnStr, port)
 }

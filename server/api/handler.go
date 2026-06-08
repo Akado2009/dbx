@@ -42,12 +42,42 @@ func (s *Server) createProject(c *gin.Context) {
 }
 
 func (s *Server) listBranches(c *gin.Context) {
-	branches, err := s.store.ListBranches(c.Request.Context(), c.Param("projectID"))
+	ctx := c.Request.Context()
+	projectID := c.Param("projectID")
+
+	project, err := s.store.GetProject(ctx, projectID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
+		return
+	}
+
+	branches, err := s.store.ListBranches(ctx, projectID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, branches)
+
+	// enrich each branch with a ready-to-use connection string
+	type branchView struct {
+		ID               string `json:"id"`
+		Name             string `json:"name"`
+		PgPort           int    `json:"pg_port"`
+		Status           string `json:"status"`
+		ParentLSN        string `json:"parent_lsn"`
+		ConnectionString string `json:"connection_string"`
+	}
+	views := make([]branchView, len(branches))
+	for i, b := range branches {
+		views[i] = branchView{
+			ID:               b.ID,
+			Name:             b.Name,
+			PgPort:           b.PgPort,
+			Status:           b.Status,
+			ParentLSN:        b.ParentLSN,
+			ConnectionString: core.BranchConnString(project.ConnString, b.PgPort),
+		}
+	}
+	c.JSON(http.StatusOK, views)
 }
 
 func (s *Server) createBranch(c *gin.Context) {
@@ -94,7 +124,7 @@ func (s *Server) createBranch(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{
 		"id":                branch.ID,
 		"name":              branch.Name,
-		"connection_string": fmt.Sprintf("postgresql://localhost:%d/dbx", port),
+		"connection_string": core.BranchConnString(project.ConnString, port),
 	})
 }
 
@@ -246,4 +276,30 @@ func (s *Server) diffBranch(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"changes": changes})
+}
+
+func (s *Server) statusBranch(c *gin.Context) {
+	ctx := c.Request.Context()
+	projectID := c.Param("projectID")
+	name := c.Param("name")
+
+	project, err := s.store.GetProject(ctx, projectID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
+		return
+	}
+
+	branch, err := s.store.GetBranch(ctx, projectID, name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "branch not found"})
+		return
+	}
+
+	status, err := core.BranchStatus(ctx, project.ConnString, branch)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, status)
 }

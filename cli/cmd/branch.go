@@ -75,10 +75,9 @@ var branchListCmd = &cobra.Command{
 		fmt.Printf("  %-20s  %-8s  %-10s  %s\n", "NAME", "PORT", "STATUS", "CONNECTION")
 		fmt.Printf("  %-20s  %-8s  %-10s  %s\n", "----", "----", "------", "----------")
 		for _, b := range result {
-			port := fmt.Sprintf("%v", b["pg_port"])
-			conn := fmt.Sprintf("postgresql://localhost:%s/%s", port, projectDB(pid))
-			fmt.Printf("  %-20s  %-8s  %-10s  %s\n",
-				b["name"], port, b["status"], conn)
+			conn, _ := b["connection_string"].(string)
+			fmt.Printf("  %-20s  %-8v  %-10s  %s\n",
+				b["name"], b["pg_port"], b["status"], conn)
 		}
 	},
 }
@@ -279,12 +278,62 @@ func printDiff(indent string, oldRaw, newRaw any) {
 	}
 }
 
+var branchStatusCmd = &cobra.Command{
+	Use:   "status <name>",
+	Short: "Show branch status vs main",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		name := args[0]
+		pid := mustProjectID()
+
+		resp, err := http.Get(fmt.Sprintf("%s/projects/%s/branches/%s/status", serverURL(), pid, name))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		defer resp.Body.Close()
+
+		var s map[string]any
+		json.NewDecoder(resp.Body).Decode(&s)
+
+		if errMsg, ok := s["error"].(string); ok {
+			fmt.Fprintf(os.Stderr, "error: %s\n", errMsg)
+			os.Exit(1)
+		}
+
+		behindMain, _ := s["behind_main"].(bool)
+		pendingMain := int(s["pending_main_changes"].(float64))
+		pendingBranch := int(s["pending_branch_changes"].(float64))
+		conflicts := int(s["conflicts"].(float64))
+
+		fmt.Printf("Branch:  %s\n", name)
+		fmt.Printf("Status:  %v\n", s["status"])
+
+		if behindMain {
+			fmt.Printf("Main:    ⚠  behind by %d change(s) — run: dbx branch rebase %s\n", pendingMain, name)
+		} else {
+			fmt.Printf("Main:    ✓  up to date\n")
+		}
+
+		if pendingBranch > 0 {
+			fmt.Printf("Changes: %d change(s) ready to merge\n", pendingBranch)
+		} else {
+			fmt.Printf("Changes: none\n")
+		}
+
+		if conflicts > 0 {
+			fmt.Printf("Conflicts: ✗ %d conflict(s) detected\n", conflicts)
+		}
+	},
+}
+
 func init() {
 	branchRebaseCmd.Flags().BoolVar(&rebaseContinue, "continue", false, "Continue rebase after resolving conflicts")
 	branchCmd.AddCommand(
 		branchCreateCmd,
 		branchListCmd,
 		branchDiffCmd,
+		branchStatusCmd,
 		branchRebaseCmd,
 		branchMergeCmd,
 		branchDeleteCmd,
