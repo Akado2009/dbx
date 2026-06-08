@@ -196,16 +196,6 @@ func pgCommand(name string, args ...string) *exec.Cmd {
 	return exec.Command(name, args...)
 }
 
-// runAsPostgres runs a simple command as postgres user.
-func runAsPostgres(name string, args ...string) error {
-	cmd := pgCommand(name, args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%w: %s", err, stderr.String())
-	}
-	return nil
-}
 
 func waitForPostgres(ctx context.Context, port int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"testing"
 )
 
@@ -107,7 +108,7 @@ func TestRowToSetParts_OnlyPK(t *testing.T) {
 func TestApplyChanges_EmptyNoop(t *testing.T) {
 	// ApplyChanges with empty slice should not error even without a DB
 	// (it returns early before connecting)
-	err := ApplyChanges(nil, "", []*Change{})
+	err := ApplyChanges(context.TODO(), "", []*Change{})
 	if err != nil {
 		t.Errorf("expected nil error for empty changes, got %v", err)
 	}

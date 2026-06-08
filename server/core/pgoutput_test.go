@@ -23,11 +23,6 @@ func buildUint32(v uint32) []byte {
 	return b
 }
 
-func buildUint64(v uint64) []byte {
-	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, v)
-	return b
-}
 
 func buildTextDatum(s string) []byte {
 	b := []byte{'t'}

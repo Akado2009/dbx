@@ -243,17 +243,6 @@ var branchDeleteCmd = &cobra.Command{
 	},
 }
 
-// projectDB returns the database name for a project from config.
-func projectDB(pid string) string {
-	if globalConfig != nil {
-		for _, p := range globalConfig.Projects {
-			if p.ID == pid {
-				return "myapp" // TODO: store db name in config
-			}
-		}
-	}
-	return "myapp"
-}
 
 func printRow(indent string, raw any) {
 	row, _ := raw.(map[string]any)

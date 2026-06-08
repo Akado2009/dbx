@@ -297,7 +297,7 @@ func (r *reader) readUint32() (uint32, error) {
 	return binary.BigEndian.Uint32(b), nil
 }
 
-func (r *reader) readUint64() (uint64, error) {
+func (r *reader) readUint64() (uint64, error) { //nolint:unused
 	b, err := r.readBytes(8)
 	if err != nil {
 		return 0, err
