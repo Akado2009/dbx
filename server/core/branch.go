@@ -77,8 +77,9 @@ func CreateBranch(ctx context.Context, mainConnStr, sourceConnStr, branchID, nam
 
 // DeleteBranch drops replication slots and stops the branch PG instance.
 func DeleteBranch(ctx context.Context, mainConnStr string, branch *db.Branch) error {
-	branchConnStr := fmt.Sprintf("postgresql://localhost:%d/%s?sslmode=disable",
-		branch.PgPort, pgDatabase(mainConnStr))
+	cfg, _ := pgx.ParseConfig(mainConnStr)
+	branchConnStr := fmt.Sprintf("postgresql://%s@localhost:%d/%s?sslmode=disable",
+		cfg.User, branch.PgPort, cfg.Database)
 
 	// drop slots from branch PG (best effort)
 	if branchConn, err := pgx.Connect(ctx, branchConnStr); err == nil {

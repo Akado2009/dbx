@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -76,12 +77,13 @@ var branchListCmd = &cobra.Command{
 			return
 		}
 
-		fmt.Printf("  %-20s  %-8s  %-10s  %s\n", "NAME", "PORT", "STATUS", "CONNECTION")
-		fmt.Printf("  %-20s  %-8s  %-10s  %s\n", "----", "----", "------", "----------")
+		fmt.Printf("  %-20s  %-8s  %-10s  %-14s  %s\n", "NAME", "PORT", "STATUS", "EXPIRES", "CONNECTION")
+		fmt.Printf("  %-20s  %-8s  %-10s  %-14s  %s\n", "----", "----", "------", "-------", "----------")
 		for _, b := range result {
 			conn, _ := b["connection_string"].(string)
-			fmt.Printf("  %-20s  %-8v  %-10s  %s\n",
-				b["name"], b["pg_port"], b["status"], conn)
+			expires := formatExpires(b["expires_at"])
+			fmt.Printf("  %-20s  %-8v  %-10s  %-14s  %s\n",
+				b["name"], b["pg_port"], b["status"], expires, conn)
 		}
 	},
 }
@@ -244,6 +246,32 @@ var branchDeleteCmd = &cobra.Command{
 }
 
 
+func formatExpires(raw any) string {
+	if raw == nil {
+		return "-"
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return "-"
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return "-"
+	}
+	d := time.Until(t)
+	if d < 0 {
+		return "expired"
+	}
+	if d > 24*time.Hour {
+		days := int(d.Hours() / 24)
+		return fmt.Sprintf("⏱ %dd", days)
+	}
+	if d > time.Hour {
+		return fmt.Sprintf("⏱ %dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("⏱ %dm", int(d.Minutes()))
+}
+
 func printRow(indent string, raw any) {
 	row, _ := raw.(map[string]any)
 	for k, v := range row {
@@ -306,7 +334,15 @@ var branchStatusCmd = &cobra.Command{
 		}
 
 		if conflicts > 0 {
-			fmt.Printf("Conflicts: ✗ %d conflict(s) detected\n", conflicts)
+			fmt.Printf("Conflicts: ✗ %d conflict(s) — resolve and run: dbx branch rebase %s --continue\n", conflicts, name)
+			if rawConflicts, ok := s["conflict_details"].([]any); ok {
+				for _, raw := range rawConflicts {
+					c, _ := raw.(map[string]any)
+					fmt.Printf("  table=%-15s  id=%-8v  column=%v\n", c["table"], c["primary_key"], c["column"])
+					fmt.Printf("    main:   %v\n", c["main_value"])
+					fmt.Printf("    yours:  %v\n", c["your_value"])
+				}
+			}
 		}
 	},
 }

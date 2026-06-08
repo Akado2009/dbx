@@ -9,14 +9,15 @@ import (
 )
 
 type BranchStatusResult struct {
-	Branch        string `json:"branch"`
-	Status        string `json:"status"`
-	BranchLSN     string `json:"branch_lsn"`
-	MainLSN       string `json:"main_lsn"`
-	BehindMain    bool   `json:"behind_main"`
-	PendingMain   int    `json:"pending_main_changes"`   // changes in main not yet in branch
-	PendingBranch int    `json:"pending_branch_changes"` // changes in branch not yet in main
-	Conflicts     int    `json:"conflicts"`
+	Branch          string      `json:"branch"`
+	Status          string      `json:"status"`
+	BranchLSN       string      `json:"branch_lsn"`
+	MainLSN         string      `json:"main_lsn"`
+	BehindMain      bool        `json:"behind_main"`
+	PendingMain     int         `json:"pending_main_changes"`   // changes in main not yet in branch
+	PendingBranch   int         `json:"pending_branch_changes"` // changes in branch not yet in main
+	Conflicts       int         `json:"conflicts"`
+	ConflictDetails []*Conflict `json:"conflict_details,omitempty"`
 }
 
 func BranchStatus(ctx context.Context, mainConnStr string, branch *db.Branch) (*BranchStatusResult, error) {
@@ -57,7 +58,7 @@ func BranchStatus(ctx context.Context, mainConnStr string, branch *db.Branch) (*
 
 	conflicts := DetectConflicts(mainChanges, branchChanges)
 
-	return &BranchStatusResult{
+	result := &BranchStatusResult{
 		Branch:        branch.Name,
 		Status:        branch.Status,
 		BranchLSN:     branchLSN,
@@ -66,5 +67,9 @@ func BranchStatus(ctx context.Context, mainConnStr string, branch *db.Branch) (*
 		PendingMain:   len(mainChanges),
 		PendingBranch: len(branchChanges),
 		Conflicts:     len(conflicts),
-	}, nil
+	}
+	if len(conflicts) > 0 {
+		result.ConflictDetails = conflicts
+	}
+	return result, nil
 }
