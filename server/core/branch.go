@@ -105,14 +105,10 @@ func StopBranch(branch *db.Branch) error {
 }
 
 func stopPostgres(dataDir string) error {
-	var stderr bytes.Buffer
 	cmd := pgCommand("pg_ctl", "stop", "-D", dataDir, "-m", "fast")
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%w: %s", err, stderr.String())
-	}
-	// remove data dir after clean shutdown
+	cmd.Stderr = os.Stderr
+	cmd.Run() // best effort — ignore error, PG may already be stopped
 	return os.RemoveAll(dataDir)
 }
 

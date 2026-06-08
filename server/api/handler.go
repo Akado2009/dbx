@@ -202,28 +202,23 @@ func (s *Server) rebaseContinue(c *gin.Context) {
 		return
 	}
 
-	// re-run rebase now that user resolved conflicts manually
 	project, err := s.store.GetProject(ctx, projectID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
 		return
 	}
 
-	result, err := core.RebaseBranch(ctx, project.ConnString, branch)
+	// User resolved conflicts manually in the branch DB.
+	// Accept their resolution: advance main slot to current LSN and update ParentLSN.
+	newLSN, err := core.AcceptRebase(ctx, project.ConnString, branch)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	if len(result.Conflicts) > 0 {
-		s.store.SaveConflicts(ctx, branch.ID, result.Conflicts)
-		c.JSON(http.StatusConflict, gin.H{"conflicts": result.Conflicts})
-		return
-	}
-
 	s.store.ClearConflicts(ctx, branch.ID)
-	s.store.UpdateBranchLSN(ctx, branch.ID, result.NewLSN)
-	c.JSON(http.StatusOK, gin.H{"rebased": true, "new_lsn": result.NewLSN})
+	s.store.UpdateBranchLSN(ctx, branch.ID, newLSN)
+	c.JSON(http.StatusOK, gin.H{"rebased": true, "new_lsn": newLSN})
 }
 
 func (s *Server) mergeBranch(c *gin.Context) {

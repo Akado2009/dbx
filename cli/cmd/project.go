@@ -45,9 +45,56 @@ var projectInitCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		fmt.Printf("✓ Project created: %s (id: %s)\n", name, result["id"])
-		fmt.Printf("\nAdd to ~/.dbx/config.yaml:\n")
-		fmt.Printf("  projects:\n    %s:\n      id: %s\n", name, result["id"])
+		id := fmt.Sprintf("%v", result["id"])
+
+		// save to ~/.dbx/config.yaml automatically
+		cfg := globalConfig
+		if cfg == nil {
+			cfg = &Config{}
+		}
+		if cfg.Projects == nil {
+			cfg.Projects = map[string]Project{}
+		}
+		cfg.Projects[name] = Project{ID: id, Name: name}
+		// if this is the only project, set as active
+		if len(cfg.Projects) == 1 {
+			cfg.ProjectID = id
+		}
+		if err := saveConfig(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not save config: %v\n", err)
+		}
+
+		// also write .dbx in current dir
+		os.WriteFile(".dbx", []byte(id+"\n"), 0644)
+
+		fmt.Printf("✓ Project created: %s\n", name)
+		fmt.Printf("  ID: %s\n", id)
+		fmt.Printf("  Saved to ~/.dbx/config.yaml and .dbx\n")
+		fmt.Printf("\nYou can now run dbx commands without -p flag.\n")
+	},
+}
+
+var projectUseCmd = &cobra.Command{
+	Use:   "use <name>",
+	Short: "Set active project (writes .dbx in current dir)",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		name := args[0]
+
+		// look up by name in config
+		if globalConfig != nil {
+			if p, ok := globalConfig.Projects[name]; ok {
+				os.WriteFile(".dbx", []byte(p.ID+"\n"), 0644)
+				fmt.Printf("✓ Active project: %s (%s)\n", name, p.ID)
+				fmt.Printf("  .dbx written to current directory\n")
+				return
+			}
+		}
+
+		// maybe name is actually an ID
+		os.WriteFile(".dbx", []byte(name+"\n"), 0644)
+		fmt.Printf("✓ Active project set to: %s\n", name)
+		fmt.Printf("  .dbx written to current directory\n")
 	},
 }
 
@@ -70,15 +117,28 @@ var projectListCmd = &cobra.Command{
 			return
 		}
 
-		fmt.Printf("  %-36s  %s\n", "ID", "NAME")
-		fmt.Printf("  %-36s  %s\n", "--", "----")
+		// mark active project
+		active := ""
+		if data, err := os.ReadFile(".dbx"); err == nil {
+			active = string(data)
+			for len(active) > 0 && (active[len(active)-1] == '\n' || active[len(active)-1] == '\r') {
+				active = active[:len(active)-1]
+			}
+		}
+
+		fmt.Printf("  %-36s  %-20s\n", "ID", "NAME")
+		fmt.Printf("  %-36s  %-20s\n", "--", "----")
 		for _, p := range result {
-			fmt.Printf("  %-36s  %s\n", p["id"], p["name"])
+			marker := "  "
+			if fmt.Sprintf("%v", p["id"]) == active {
+				marker = "* "
+			}
+			fmt.Printf("%s%-36s  %s\n", marker, p["id"], p["name"])
 		}
 	},
 }
 
 func init() {
-	projectCmd.AddCommand(projectInitCmd, projectListCmd)
+	projectCmd.AddCommand(projectInitCmd, projectListCmd, projectUseCmd)
 	rootCmd.AddCommand(projectCmd)
 }

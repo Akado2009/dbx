@@ -80,6 +80,21 @@ func CreateSlot(ctx context.Context, conn *pgx.Conn, slotName string) (lsn strin
 	return lsn, err
 }
 
+// AdvanceSlot consumes all changes in slotName up to toLSN.
+// Call this after a successful rebase so the slot doesn't re-replay old changes.
+func AdvanceSlot(ctx context.Context, connStr, slotName, toLSN string) error {
+	conn, err := pgx.Connect(ctx, connStr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+	_, err = conn.Exec(ctx, fmt.Sprintf(
+		`SELECT pg_replication_slot_advance('%s', '%s')`,
+		slotName, toLSN,
+	))
+	return err
+}
+
 // DropSlot removes a replication slot. Call on branch delete.
 func DropSlot(ctx context.Context, conn *pgx.Conn, slotName string) error {
 	_, err := conn.Exec(ctx, fmt.Sprintf(
@@ -174,7 +189,34 @@ func relName(rel *RelationMsg) string {
 	return rel.Name
 }
 
+// deduplicateChanges keeps only the last change per table+PK (latest wins).
+func deduplicateChanges(changes []*Change) []*Change {
+	type key struct {
+		table string
+		pk    any
+	}
+	last := map[key]int{}
+	for i, c := range changes {
+		last[key{c.Table, c.PrimaryKey}] = i
+	}
+	var out []*Change
+	seen := map[key]bool{}
+	for i := len(changes) - 1; i >= 0; i-- {
+		c := changes[i]
+		k := key{c.Table, c.PrimaryKey}
+		if last[k] == i && !seen[k] {
+			seen[k] = true
+			out = append([]*Change{c}, out...)
+		}
+	}
+	return out
+}
+
 func DetectConflicts(mainChanges, branchChanges []*Change) []*Conflict {
+	// deduplicate: for same PK keep only last change
+	mainChanges = deduplicateChanges(mainChanges)
+	branchChanges = deduplicateChanges(branchChanges)
+
 	var conflicts []*Conflict
 	for _, mc := range mainChanges {
 		for _, bc := range branchChanges {

@@ -64,5 +64,29 @@ func RebaseBranch(ctx context.Context, mainConnStr string, branch *db.Branch) (*
 		return nil, fmt.Errorf("apply changes: %w", err)
 	}
 
+	// advance main slot so next rebase doesn't re-replay the same changes
+	AdvanceSlot(ctx, mainConnStr, mainSlot, currentLSN)
+
 	return &RebaseResult{NewLSN: currentLSN}, nil
+}
+
+// AcceptRebase is called after the user manually resolves conflicts.
+// It advances the main slot to current LSN (accepting user's resolution)
+// without re-applying or re-detecting conflicts.
+func AcceptRebase(ctx context.Context, mainConnStr string, branch *db.Branch) (string, error) {
+	mainConn, err := pgx.Connect(ctx, mainConnStr)
+	if err != nil {
+		return "", err
+	}
+	defer mainConn.Close(ctx)
+
+	var currentLSN string
+	if err := mainConn.QueryRow(ctx, `SELECT pg_current_wal_lsn()::text`).Scan(&currentLSN); err != nil {
+		return "", err
+	}
+
+	mainSlot := SlotName("main_" + branch.ProjectID + "-" + branch.Name)
+	AdvanceSlot(ctx, mainConnStr, mainSlot, currentLSN)
+
+	return currentLSN, nil
 }

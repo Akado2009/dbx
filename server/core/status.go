@@ -32,7 +32,10 @@ func BranchStatus(ctx context.Context, mainConnStr string, branch *db.Branch) (*
 	branchConnStr := BranchConnString(mainConnStr, branch.PgPort)
 	branchConn, err := pgx.Connect(ctx, branchConnStr)
 	if err != nil {
-		return nil, fmt.Errorf("connect to branch: %w", err)
+		return &BranchStatusResult{
+			Branch: branch.Name,
+			Status: "offline",
+		}, nil
 	}
 	defer branchConn.Close(ctx)
 

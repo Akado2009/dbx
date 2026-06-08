@@ -40,7 +40,14 @@ func MergeBranch(ctx context.Context, mainConnStr string, branch *db.Branch) err
 		return fmt.Errorf("get branch changes: %w", err)
 	}
 
-	return ApplyChanges(ctx, mainConnStr, branchChanges)
+	if err := ApplyChanges(ctx, mainConnStr, branchChanges); err != nil {
+		return err
+	}
+
+	// advance branch slot so it's clean after merge
+	AdvanceSlot(ctx, branchConnStr, branchSlot, branchLSN)
+
+	return nil
 }
 
 func DiffBranch(ctx context.Context, mainConnStr string, branch *db.Branch) ([]*Change, error) {
