@@ -11,6 +11,28 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
+// setupCtx returns a background context for tests.
+func setupCtx(t *testing.T) context.Context {
+	t.Helper()
+	return context.Background()
+}
+
+func mustConnect(t *testing.T, ctx context.Context, connStr string) *pgx.Conn {
+	t.Helper()
+	conn, err := pgx.Connect(ctx, connStr)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	return conn
+}
+
+func mustExec(t *testing.T, conn *pgx.Conn, ctx context.Context, sql string) {
+	t.Helper()
+	if _, err := conn.Exec(ctx, sql); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+}
+
 // setupPG spins up a Postgres container with logical replication enabled.
 func setupPG(t *testing.T) (connStr string, cleanup func()) {
 	t.Helper()
