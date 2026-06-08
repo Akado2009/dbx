@@ -95,6 +95,7 @@ func (s *Server) createBranch(c *gin.Context) {
 	var req struct {
 		Name string `json:"name" binding:"required"`
 		From string `json:"from"` // optional: branch name to branch from (default: main)
+		TTL  string `json:"ttl"` // optional: e.g. "24h", "7d"
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -145,6 +146,13 @@ func (s *Server) createBranch(c *gin.Context) {
 	if err := s.store.CreateBranch(ctx, branch); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	// set TTL if requested (support "7d" shorthand in addition to Go durations)
+	if req.TTL != "" {
+		if ttl, err := parseTTL(req.TTL); err == nil {
+			s.store.SetBranchTTL(ctx, branch.ID, ttl)
+		}
 	}
 
 	c.JSON(http.StatusCreated, gin.H{

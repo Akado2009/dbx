@@ -1,0 +1,11 @@
+apiVersion: v2
+name: dbx
+description: Git-like branching for Postgres
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - postgres
+  - database
+  - branching
+home: https://github.com/akado2009/dbx

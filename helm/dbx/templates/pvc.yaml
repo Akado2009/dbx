@@ -1,0 +1,35 @@
+{{- if .Values.branchData.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "dbx.fullname" . }}-branch-data
+  labels:
+    {{- include "dbx.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.branchData.persistence.size }}
+  {{- if .Values.branchData.persistence.storageClass }}
+  storageClassName: {{ .Values.branchData.persistence.storageClass }}
+  {{- end }}
+{{- end }}
+---
+{{- if and .Values.metaDatabase.internal .Values.metaDatabase.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "dbx.fullname" . }}-meta-data
+  labels:
+    {{- include "dbx.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.metaDatabase.persistence.size }}
+  {{- if .Values.metaDatabase.persistence.storageClass }}
+  storageClassName: {{ .Values.metaDatabase.persistence.storageClass }}
+  {{- end }}
+{{- end }}

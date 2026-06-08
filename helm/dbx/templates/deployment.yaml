@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dbx.fullname" . }}
+  labels:
+    {{- include "dbx.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "dbx.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "dbx.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: dbx-server
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 7070
+              protocol: TCP
+            {{- range untilStep (.Values.branchPorts.start | int) (add1 .Values.branchPorts.end | int) 1 }}
+            - containerPort: {{ . }}
+              protocol: TCP
+            {{- end }}
+          env:
+            - name: PORT
+              value: "7070"
+            - name: META_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dbx.fullname" . }}-secrets
+                  key: meta-dsn
+          volumeMounts:
+            - name: branch-data
+              mountPath: /var/lib/dbx/branches
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: branch-data
+          {{- if .Values.branchData.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "dbx.fullname" . }}-branch-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

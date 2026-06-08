@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dbx.fullname" . }}
+  labels:
+    {{- include "dbx.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "dbx.selectorLabels" . | nindent 4 }}
+---
+{{- if ne .Values.branchPorts.serviceType "ClusterIP" }}
+# Separate service to expose branch PG ports outside the cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dbx.fullname" . }}-branches
+  labels:
+    {{- include "dbx.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.branchPorts.serviceType }}
+  ports:
+    {{- range untilStep (.Values.branchPorts.start | int) (add1 .Values.branchPorts.end | int) 1 }}
+    - port: {{ . }}
+      targetPort: {{ . }}
+      protocol: TCP
+      name: pg-{{ . }}
+    {{- end }}
+  selector:
+    {{- include "dbx.selectorLabels" . | nindent 4 }}
+{{- end }}

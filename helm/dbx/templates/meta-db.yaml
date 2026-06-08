@@ -1,0 +1,64 @@
+{{- if .Values.metaDatabase.internal }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dbx.fullname" . }}-meta
+  labels:
+    {{- include "dbx.labels" . | nindent 4 }}
+    app.kubernetes.io/component: meta-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "dbx.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: meta-db
+  template:
+    metadata:
+      labels:
+        {{- include "dbx.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: meta-db
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          env:
+            - name: POSTGRES_USER
+              value: dbx
+            - name: POSTGRES_PASSWORD
+              value: dbx
+            - name: POSTGRES_DB
+              value: dbx
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: meta-data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "dbx"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: meta-data
+          {{- if .Values.metaDatabase.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "dbx.fullname" . }}-meta-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dbx.fullname" . }}-meta
+  labels:
+    {{- include "dbx.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5432
+      targetPort: 5432
+  selector:
+    {{- include "dbx.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: meta-db
+{{- end }}

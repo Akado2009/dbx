@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 
 	"github.com/akado2009/dbx/server/api"
 	"github.com/akado2009/dbx/server/db"
@@ -39,6 +40,10 @@ func main() {
 	}
 
 	srv := api.NewServer(store)
+
+	// start TTL reaper — checks every 5 minutes for expired branches
+	srv.StartTTLReaper(ctx, 5*time.Minute)
+
 	log.Printf("dbx server listening on :%s", port)
 	srv.Run(":" + port)
 }

@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -49,6 +50,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 		ALTER TABLE branches ADD COLUMN IF NOT EXISTS slot_name TEXT NOT NULL DEFAULT '';
 		ALTER TABLE branches ADD COLUMN IF NOT EXISTS conflicts JSONB;
 		ALTER TABLE branches ADD COLUMN IF NOT EXISTS parent_branch TEXT;
+		ALTER TABLE branches ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
 	`)
 	return err
 }
@@ -60,15 +62,16 @@ type Project struct {
 }
 
 type Branch struct {
-	ID           string `json:"id"`
-	ProjectID    string `json:"project_id"`
-	Name         string `json:"name"`
-	ParentLSN    string `json:"parent_lsn"`
-	ParentBranch string `json:"parent_branch"` // empty = branched from main
-	PgPort       int    `json:"pg_port"`
-	PgDataDir    string `json:"pg_data_dir"`
-	SlotName     string `json:"slot_name"`
-	Status       string `json:"status"`
+	ID           string     `json:"id"`
+	ProjectID    string     `json:"project_id"`
+	Name         string     `json:"name"`
+	ParentLSN    string     `json:"parent_lsn"`
+	ParentBranch string     `json:"parent_branch"`
+	PgPort       int        `json:"pg_port"`
+	PgDataDir    string     `json:"pg_data_dir"`
+	SlotName     string     `json:"slot_name"`
+	Status       string     `json:"status"`
+	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
 }
 
 func (s *Store) ListProjects(ctx context.Context) ([]*Project, error) {
@@ -171,6 +174,33 @@ func (s *Store) ClearConflicts(ctx context.Context, id string) error {
 func (s *Store) DeleteBranch(ctx context.Context, id string) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM branches WHERE id = $1`, id)
 	return err
+}
+
+func (s *Store) SetBranchTTL(ctx context.Context, id string, ttl time.Duration) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE branches SET expires_at = now() + $1 WHERE id = $2`,
+		ttl, id,
+	)
+	return err
+}
+
+func (s *Store) ListExpiredBranches(ctx context.Context) ([]*Branch, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT b.id, b.name, b.project_id, b.parent_lsn, b.pg_port, b.pg_data_dir, b.slot_name, b.status, COALESCE(b.parent_branch, '')
+		 FROM branches b
+		 WHERE b.expires_at IS NOT NULL AND b.expires_at < now()`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var branches []*Branch
+	for rows.Next() {
+		b := &Branch{}
+		rows.Scan(&b.ID, &b.Name, &b.ProjectID, &b.ParentLSN, &b.PgPort, &b.PgDataDir, &b.SlotName, &b.Status, &b.ParentBranch)
+		branches = append(branches, b)
+	}
+	return branches, nil
 }
 
 func (s *Store) NextFreePort(ctx context.Context) (int, error) {

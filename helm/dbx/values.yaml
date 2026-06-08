@@ -1,0 +1,65 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/akado2009/dbx-server
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+service:
+  type: ClusterIP
+  port: 7070
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: dbx.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Connection string to your main application Postgres database
+mainDatabase:
+  connString: "postgresql://user:pass@your-postgres:5432/myapp"
+
+# Meta database — stores dbx internal state (projects, branches)
+metaDatabase:
+  # Set to true to deploy a bundled Postgres for meta DB
+  internal: true
+  # If internal: false, provide external DSN
+  externalDSN: ""
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: ""
+
+# Branch data — PG data directories for each branch
+branchData:
+  persistence:
+    enabled: true
+    size: 50Gi
+    storageClass: ""
+
+# Branch port range exposed via NodePort or LoadBalancer
+branchPorts:
+  start: 5433
+  end: 5460
+  # Set to NodePort to expose branch PGs outside cluster
+  serviceType: ClusterIP
+
+ttlReaper:
+  interval: "5m"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
