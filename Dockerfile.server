@@ -1,0 +1,16 @@
+FROM golang:1.25-bookworm AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go build -o dbx-server ./server
+
+FROM postgres:16
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /var/lib/dbx/branches
+COPY --from=builder /app/dbx-server /usr/local/bin/dbx-server
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+EXPOSE 7070
+# entrypoint fixes volume ownership then runs server as postgres
+ENTRYPOINT ["/entrypoint.sh"]

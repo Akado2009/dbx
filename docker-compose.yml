@@ -1,0 +1,65 @@
+services:
+
+  # metadata store for dbx server
+  meta-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: dbx
+      POSTGRES_PASSWORD: dbx
+      POSTGRES_DB: dbx
+    ports:
+      - "5499:5432"
+    volumes:
+      - meta-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dbx"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # sample "user" postgres — this is what you'd connect as your main DB
+  main-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: myapp
+      POSTGRES_PASSWORD: myapp
+      POSTGRES_DB: myapp
+      POSTGRES_HOST_AUTH_METHOD: "trust"
+    ports:
+      - "5432:5432"
+    command: >
+      postgres
+      -c wal_level=logical
+      -c max_replication_slots=20
+      -c max_wal_senders=20
+      -c hba_file=/etc/postgresql/pg_hba.conf
+    volumes:
+      - main-db-data:/var/lib/postgresql/data
+      - ./initdb/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myapp"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # dbx server
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    ports:
+      - "7070:7070"
+    environment:
+      META_DSN: postgresql://dbx:dbx@meta-db:5432/dbx?sslmode=disable
+      PORT: "7070"
+    depends_on:
+      meta-db:
+        condition: service_healthy
+    volumes:
+      - branch-data:/var/lib/dbx/branches
+
+volumes:
+  meta-db-data:
+  main-db-data:
+  branch-data:
