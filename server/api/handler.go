@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/akado2009/dbx/server/core"
 	"github.com/akado2009/dbx/server/db"
@@ -70,12 +71,14 @@ func (s *Server) listBranches(c *gin.Context) {
 
 	// enrich each branch with a ready-to-use connection string
 	type branchView struct {
-		ID               string `json:"id"`
-		Name             string `json:"name"`
-		PgPort           int    `json:"pg_port"`
-		Status           string `json:"status"`
-		ParentLSN        string `json:"parent_lsn"`
-		ConnectionString string `json:"connection_string"`
+		ID               string     `json:"id"`
+		Name             string     `json:"name"`
+		PgPort           int        `json:"pg_port"`
+		Status           string     `json:"status"`
+		ParentLSN        string     `json:"parent_lsn"`
+		ParentBranch     string     `json:"parent_branch"`
+		ConnectionString string     `json:"connection_string"`
+		ExpiresAt        *time.Time `json:"expires_at,omitempty"`
 	}
 	views := make([]branchView, len(branches))
 	for i, b := range branches {
@@ -85,7 +88,9 @@ func (s *Server) listBranches(c *gin.Context) {
 			PgPort:           b.PgPort,
 			Status:           b.Status,
 			ParentLSN:        b.ParentLSN,
+			ParentBranch:     b.ParentBranch,
 			ConnectionString: core.BranchConnString(project.ConnString, b.PgPort),
+			ExpiresAt:        b.ExpiresAt,
 		}
 	}
 	c.JSON(http.StatusOK, views)

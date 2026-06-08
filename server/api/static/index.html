@@ -145,9 +145,16 @@
           <div class="subtitle" id="project-conn"></div>
         </div>
         <div class="form-row">
-          <input class="input" id="new-branch-name" placeholder="branch-name" style="width:160px" />
-          <select class="input" id="new-branch-from" style="width:160px">
+          <input class="input" id="new-branch-name" placeholder="branch-name" style="width:150px" />
+          <select class="input" id="new-branch-from" style="width:150px">
             <option value="">from: main</option>
+          </select>
+          <select class="input" id="new-branch-ttl" style="width:120px">
+            <option value="">no TTL</option>
+            <option value="1h">1 hour</option>
+            <option value="24h">1 day</option>
+            <option value="7d">7 days</option>
+            <option value="30d">30 days</option>
           </select>
           <button class="btn btn-primary" onclick="createBranch()">+ Create branch</button>
         </div>
@@ -164,6 +171,7 @@
               <th>Name</th>
               <th>Status</th>
               <th>Sync</th>
+              <th>TTL</th>
               <th>Connection</th>
               <th>Actions</th>
             </tr>
@@ -204,12 +212,28 @@
   let currentProject = null;
   let branches = [];
   let branchStatuses = {};
+  let apiKey = localStorage.getItem('dbx_api_key') || '';
+
+  async function apiFetch(url, opts = {}) {
+    if (apiKey) {
+      opts.headers = { ...(opts.headers || {}), 'X-API-Key': apiKey };
+    }
+    const res = await fetch(url, opts);
+    if (res.status === 401) {
+      const key = prompt('Enter DBX API key:');
+      if (!key) return res;
+      apiKey = key;
+      localStorage.setItem('dbx_api_key', key);
+      return apiFetch(url, opts); // retry
+    }
+    return res;
+  }
 
   async function init() { await loadProjects(); }
 
   // --- Projects ---
   async function loadProjects() {
-    const res = await fetch(`${API}/projects`);
+    const res = await apiFetch(`${API}/projects`);
     const projects = await res.json();
     const el = document.getElementById('project-list');
     if (!projects || !projects.length) {
@@ -239,7 +263,7 @@
   // --- Branches ---
   async function loadBranches() {
     if (!currentProject) return;
-    const res = await fetch(`${API}/projects/${currentProject.id}/branches`);
+    const res = await apiFetch(`${API}/projects/${currentProject.id}/branches`);
     branches = await res.json() || [];
     renderBranches();
     updateFromSelect();
@@ -250,7 +274,7 @@
 
   async function loadStatus(name) {
     try {
-      const res = await fetch(`${API}/projects/${currentProject.id}/branches/${name}/status`);
+      const res = await apiFetch(`${API}/projects/${currentProject.id}/branches/${name}/status`);
       const s = await res.json();
       branchStatuses[name] = s;
       updateSyncCell(name, s);
@@ -289,6 +313,7 @@
         </td>
         <td>${statusBadge(b.status)}</td>
         <td id="sync-${b.name}"><div class="spinner"></div></td>
+        <td>${formatTTL(b.expires_at)}</td>
         <td>
           <span class="conn-string" onclick="copyConn('${b.connection_string}')" title="Click to copy">
             ${b.connection_string}
@@ -320,13 +345,15 @@
   async function createBranch() {
     const name = document.getElementById('new-branch-name').value.trim();
     const from = document.getElementById('new-branch-from').value;
+    const ttl  = document.getElementById('new-branch-ttl').value;
     if (!name) { toast('Enter a branch name', 'error'); return; }
 
     toast(`Creating branch "${name}"…`);
     const body = { name };
     if (from) body.from = from;
+    if (ttl)  body.ttl  = ttl;
 
-    const res = await fetch(`${API}/projects/${currentProject.id}/branches`, {
+    const res = await apiFetch(`${API}/projects/${currentProject.id}/branches`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
@@ -343,7 +370,7 @@
     document.getElementById('diff-modal-body').innerHTML = `<div class="flex items-center gap-8" style="padding:24px"><div class="spinner"></div> Loading…</div>`;
     openModal('diff-modal');
 
-    const res = await fetch(`${API}/projects/${currentProject.id}/branches/${name}/diff`);
+    const res = await apiFetch(`${API}/projects/${currentProject.id}/branches/${name}/diff`);
     const data = await res.json();
     if (data.error) { document.getElementById('diff-modal-body').innerHTML = `<div class="diff-empty">${data.error}</div>`; return; }
 
@@ -384,7 +411,7 @@
   // --- Rebase ---
   async function rebase(name) {
     toast(`Rebasing ${name}…`);
-    const res = await fetch(`${API}/projects/${currentProject.id}/branches/${name}/rebase`, { method: 'POST' });
+    const res = await apiFetch(`${API}/projects/${currentProject.id}/branches/${name}/rebase`, { method: 'POST' });
     const data = await res.json();
     if (data.conflicts && data.conflicts.length) {
       showConflicts(name, data.conflicts);
@@ -398,7 +425,7 @@
 
   async function rebaseContinue(name) {
     toast(`Continuing rebase of ${name}…`);
-    const res = await fetch(`${API}/projects/${currentProject.id}/branches/${name}/rebase/continue`, { method: 'POST' });
+    const res = await apiFetch(`${API}/projects/${currentProject.id}/branches/${name}/rebase/continue`, { method: 'POST' });
     const data = await res.json();
     if (data.conflicts && data.conflicts.length) { showConflicts(name, data.conflicts); return; }
     if (data.error) { toast(data.error, 'error'); return; }
@@ -435,7 +462,7 @@
   async function merge(name) {
     if (!confirm(`Merge "${name}" into main?`)) return;
     toast(`Merging ${name}…`);
-    const res = await fetch(`${API}/projects/${currentProject.id}/branches/${name}/merge`, { method: 'POST' });
+    const res = await apiFetch(`${API}/projects/${currentProject.id}/branches/${name}/merge`, { method: 'POST' });
     const data = await res.json();
     if (data.error) { toast(data.error, 'error'); return; }
     toast(`${name} merged into main`, 'success');
@@ -446,11 +473,22 @@
   async function deleteBranch(name) {
     if (!confirm(`Delete branch "${name}"? This cannot be undone.`)) return;
     toast(`Deleting ${name}…`);
-    const res = await fetch(`${API}/projects/${currentProject.id}/branches/${name}`, { method: 'DELETE' });
+    const res = await apiFetch(`${API}/projects/${currentProject.id}/branches/${name}`, { method: 'DELETE' });
     const data = await res.json();
     if (data.error) { toast(data.error, 'error'); return; }
     toast(`${name} deleted`, 'success');
     await loadBranches();
+  }
+
+  function formatTTL(expiresAt) {
+    if (!expiresAt) return `<span style="color:#484f58;font-size:11px">—</span>`;
+    const diff = new Date(expiresAt) - new Date();
+    if (diff < 0) return `<span style="color:#f85149;font-size:11px">expired</span>`;
+    const h = Math.floor(diff / 3600000);
+    const d = Math.floor(h / 24);
+    const label = d > 0 ? `${d}d ${h % 24}h` : `${h}h`;
+    const color = h < 2 ? '#f85149' : h < 24 ? '#d29922' : '#8b949e';
+    return `<span style="color:${color};font-size:11px">⏱ ${label}</span>`;
   }
 
   function copyConn(str) {

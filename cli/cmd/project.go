@@ -1,10 +1,8 @@
 package cmd
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -26,11 +24,7 @@ var projectInitCmd = &cobra.Command{
 			"name":              name,
 			"connection_string": connStr,
 		})
-		resp, err := http.Post(
-			fmt.Sprintf("%s/projects", serverURL()),
-			"application/json",
-			bytes.NewReader(body),
-		)
+		resp, err := doPost(fmt.Sprintf("%s/projects", serverURL()), body)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
@@ -102,7 +96,7 @@ var projectListCmd = &cobra.Command{
 	Use:   "ls",
 	Short: "List all projects",
 	Run: func(cmd *cobra.Command, args []string) {
-		resp, err := http.Get(fmt.Sprintf("%s/projects", serverURL()))
+		resp, err := doGet(fmt.Sprintf("%s/projects", serverURL()))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)

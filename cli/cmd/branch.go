@@ -1,10 +1,8 @@
 package cmd
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -15,6 +13,9 @@ var branchCmd = &cobra.Command{
 	Short: "Manage database branches",
 }
 
+var createFrom string
+var createTTL string
+
 var branchCreateCmd = &cobra.Command{
 	Use:   "create <name>",
 	Short: "Create a new branch",
@@ -24,12 +25,15 @@ var branchCreateCmd = &cobra.Command{
 		pid := mustProjectID()
 
 		fmt.Printf("Creating branch %s...\n", name)
-		body, _ := json.Marshal(map[string]string{"name": name})
-		resp, err := http.Post(
-			fmt.Sprintf("%s/projects/%s/branches", serverURL(), pid),
-			"application/json",
-			bytes.NewReader(body),
-		)
+		reqBody := map[string]string{"name": name}
+		if createFrom != "" {
+			reqBody["from"] = createFrom
+		}
+		if createTTL != "" {
+			reqBody["ttl"] = createTTL
+		}
+		body, _ := json.Marshal(reqBody)
+		resp, err := doPost(fmt.Sprintf("%s/projects/%s/branches", serverURL(), pid), body)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
@@ -57,7 +61,7 @@ var branchListCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		pid := mustProjectID()
 
-		resp, err := http.Get(fmt.Sprintf("%s/projects/%s/branches", serverURL(), pid))
+		resp, err := doGet(fmt.Sprintf("%s/projects/%s/branches", serverURL(), pid))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
@@ -90,7 +94,7 @@ var branchDiffCmd = &cobra.Command{
 		name := args[0]
 		pid := mustProjectID()
 
-		resp, err := http.Get(fmt.Sprintf("%s/projects/%s/branches/%s/diff", serverURL(), pid, name))
+		resp, err := doGet(fmt.Sprintf("%s/projects/%s/branches/%s/diff", serverURL(), pid, name))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
@@ -150,7 +154,7 @@ var branchRebaseCmd = &cobra.Command{
 			fmt.Printf("Rebasing %s on main...\n", name)
 		}
 
-		resp, err := http.Post(url, "application/json", nil)
+		resp, err := doPost(url, nil)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
@@ -193,11 +197,7 @@ var branchMergeCmd = &cobra.Command{
 		pid := mustProjectID()
 
 		fmt.Printf("Merging %s into main...\n", name)
-		resp, err := http.Post(
-			fmt.Sprintf("%s/projects/%s/branches/%s/merge", serverURL(), pid, name),
-			"application/json",
-			nil,
-		)
+		resp, err := doPost(fmt.Sprintf("%s/projects/%s/branches/%s/merge", serverURL(), pid, name), nil)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
@@ -224,12 +224,7 @@ var branchDeleteCmd = &cobra.Command{
 		name := args[0]
 		pid := mustProjectID()
 
-		req, _ := http.NewRequest(
-			http.MethodDelete,
-			fmt.Sprintf("%s/projects/%s/branches/%s", serverURL(), pid, name),
-			nil,
-		)
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := doDelete(fmt.Sprintf("%s/projects/%s/branches/%s", serverURL(), pid, name))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
@@ -286,7 +281,7 @@ var branchStatusCmd = &cobra.Command{
 		name := args[0]
 		pid := mustProjectID()
 
-		resp, err := http.Get(fmt.Sprintf("%s/projects/%s/branches/%s/status", serverURL(), pid, name))
+		resp, err := doGet(fmt.Sprintf("%s/projects/%s/branches/%s/status", serverURL(), pid, name))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
@@ -328,6 +323,8 @@ var branchStatusCmd = &cobra.Command{
 }
 
 func init() {
+	branchCreateCmd.Flags().StringVar(&createFrom, "from", "", "Branch from another branch (default: main)")
+	branchCreateCmd.Flags().StringVar(&createTTL, "ttl", "", "Auto-delete after duration, e.g. 24h, 7d")
 	branchRebaseCmd.Flags().BoolVar(&rebaseContinue, "continue", false, "Continue rebase after resolving conflicts")
 	branchCmd.AddCommand(
 		branchCreateCmd,

@@ -19,6 +19,7 @@ type Server struct {
 func NewServer(store *db.Store) *Server {
 	r := gin.Default()
 	r.RedirectTrailingSlash = false
+	r.Use(authMiddleware())
 	s := &Server{store: store, router: r}
 	s.routes()
 	return s

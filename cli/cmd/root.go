@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -10,6 +12,7 @@ import (
 
 type Config struct {
 	Server    string             `yaml:"server"`
+	APIKey    string             `yaml:"api_key"`
 	Projects  map[string]Project `yaml:"projects"`
 	ProjectID string             `yaml:"project_id"` // active project for this dir
 }
@@ -78,6 +81,62 @@ func serverURL() string {
 		return globalConfig.Server
 	}
 	return "http://localhost:7070"
+}
+
+// apiKey returns the API key from config or DBX_API_KEY env var.
+func apiKey() string {
+	if k := os.Getenv("DBX_API_KEY"); k != "" {
+		return k
+	}
+	if globalConfig != nil {
+		return globalConfig.APIKey
+	}
+	return ""
+}
+
+// newRequest creates an HTTP request with auth header if API key is set.
+func newRequest(method, url string, body []byte) (*http.Request, error) {
+	var req *http.Request
+	var err error
+	if body != nil {
+		req, err = http.NewRequest(method, url, bytes.NewReader(body))
+	} else {
+		req, err = http.NewRequest(method, url, nil)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if key := apiKey(); key != "" {
+		req.Header.Set("X-API-Key", key)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return req, nil
+}
+
+func doGet(url string) (*http.Response, error) {
+	req, err := newRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return http.DefaultClient.Do(req)
+}
+
+func doPost(url string, body []byte) (*http.Response, error) {
+	req, err := newRequest(http.MethodPost, url, body)
+	if err != nil {
+		return nil, err
+	}
+	return http.DefaultClient.Do(req)
+}
+
+func doDelete(url string) (*http.Response, error) {
+	req, err := newRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return http.DefaultClient.Do(req)
 }
 
 // mustProjectID returns the active project ID from:
