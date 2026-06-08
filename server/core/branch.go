@@ -116,13 +116,6 @@ func stopPostgres(dataDir string) error {
 	return os.RemoveAll(dataDir)
 }
 
-func pgDatabase(connStr string) string {
-	cfg, err := pgx.ParseConfig(connStr)
-	if err != nil {
-		return "myapp"
-	}
-	return cfg.Database
-}
 
 func baseBackup(mainConnStr, dataDir string) error {
 	// remove stale data dir if exists (e.g. leftover from previous branch with same name)
