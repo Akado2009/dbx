@@ -11,15 +11,8 @@ import (
 )
 
 type Config struct {
-	Server    string             `yaml:"server"`
-	APIKey    string             `yaml:"api_key"`
-	Projects  map[string]Project `yaml:"projects"`
-	ProjectID string             `yaml:"project_id"` // active project for this dir
-}
-
-type Project struct {
-	ID   string `yaml:"id"`
-	Name string `yaml:"name"`
+	Server string `yaml:"server"`
+	APIKey string `yaml:"api_key"`
 }
 
 var (
@@ -152,8 +145,6 @@ func doDelete(url string) (*http.Response, error) {
 // mustProjectID returns the active project ID from:
 // 1. -p flag
 // 2. .dbx file in current directory
-// 3. global config active project
-// 4. only project in config (if just one)
 func mustProjectID() string {
 	if projectID != "" {
 		return projectID
@@ -162,27 +153,11 @@ func mustProjectID() string {
 	// check .dbx file in current dir (like .git)
 	if data, err := os.ReadFile(".dbx"); err == nil {
 		id := string(data)
-		if len(id) > 0 {
-			// trim newline
-			for len(id) > 0 && (id[len(id)-1] == '\n' || id[len(id)-1] == '\r') {
-				id = id[:len(id)-1]
-			}
-			if id != "" {
-				return id
-			}
+		for len(id) > 0 && (id[len(id)-1] == '\n' || id[len(id)-1] == '\r') {
+			id = id[:len(id)-1]
 		}
-	}
-
-	if globalConfig != nil {
-		// active project set explicitly
-		if globalConfig.ProjectID != "" {
-			return globalConfig.ProjectID
-		}
-		// only one project — use it automatically
-		if len(globalConfig.Projects) == 1 {
-			for _, p := range globalConfig.Projects {
-				return p.ID
-			}
+		if id != "" {
+			return id
 		}
 	}
 

@@ -124,6 +124,7 @@ func saveToken(email, token string) {
 		cfg = &Config{Server: serverURL()}
 	}
 	cfg.APIKey = token
+	_ = email
 	if err := saveConfig(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not save config: %v\n", err)
 		fmt.Printf("  Token: %s\n", token)

@@ -64,6 +64,14 @@ func (s *Store) Migrate(ctx context.Context) error {
 			created_at  TIMESTAMPTZ DEFAULT now(),
 			UNIQUE(project_id, name)
 		);
+		CREATE TABLE IF NOT EXISTS branch_events (
+			id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+			branch_id  TEXT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+			event      TEXT NOT NULL,
+			detail     TEXT,
+			created_at TIMESTAMPTZ DEFAULT now()
+		);
+
 		-- migrations for existing schemas
 		ALTER TABLE branches ADD COLUMN IF NOT EXISTS slot_name TEXT NOT NULL DEFAULT '';
 		ALTER TABLE branches ADD COLUMN IF NOT EXISTS conflicts JSONB;
@@ -308,6 +316,42 @@ func (s *Store) ListExpiredBranches(ctx context.Context) ([]*Branch, error) {
 		branches = append(branches, b)
 	}
 	return branches, nil
+}
+
+// --- Branch events (log) ---
+
+type BranchEvent struct {
+	ID        string    `json:"id"`
+	BranchID  string    `json:"branch_id"`
+	Event     string    `json:"event"`
+	Detail    string    `json:"detail,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (s *Store) LogEvent(ctx context.Context, branchID, event, detail string) {
+	s.pool.Exec(ctx,
+		`INSERT INTO branch_events (branch_id, event, detail) VALUES ($1, $2, NULLIF($3, ''))`,
+		branchID, event, detail,
+	)
+}
+
+func (s *Store) GetBranchLog(ctx context.Context, branchID string) ([]*BranchEvent, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, event, COALESCE(detail, ''), created_at
+		 FROM branch_events WHERE branch_id = $1 ORDER BY created_at`,
+		branchID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var events []*BranchEvent
+	for rows.Next() {
+		e := &BranchEvent{BranchID: branchID}
+		rows.Scan(&e.ID, &e.Event, &e.Detail, &e.CreatedAt)
+		events = append(events, e)
+	}
+	return events, nil
 }
 
 func (s *Store) NextFreePort(ctx context.Context) (int, error) {

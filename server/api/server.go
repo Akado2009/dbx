@@ -58,4 +58,5 @@ func (s *Server) routes() {
 	s.router.POST("/projects/:projectID/branches/:name/merge", s.mergeBranch)
 	s.router.GET("/projects/:projectID/branches/:name/diff", s.diffBranch)
 	s.router.GET("/projects/:projectID/branches/:name/status", s.statusBranch)
+	s.router.GET("/projects/:projectID/branches/:name/log", s.branchLog)
 }

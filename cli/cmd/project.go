@@ -41,29 +41,12 @@ var projectInitCmd = &cobra.Command{
 
 		id := fmt.Sprintf("%v", result["id"])
 
-		// save to ~/.dbx/config.yaml automatically
-		cfg := globalConfig
-		if cfg == nil {
-			cfg = &Config{}
-		}
-		if cfg.Projects == nil {
-			cfg.Projects = map[string]Project{}
-		}
-		cfg.Projects[name] = Project{ID: id, Name: name}
-		// if this is the only project, set as active
-		if len(cfg.Projects) == 1 {
-			cfg.ProjectID = id
-		}
-		if err := saveConfig(cfg); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not save config: %v\n", err)
-		}
-
-		// also write .dbx in current dir
+		// write .dbx in current dir — source of truth for active project
 		os.WriteFile(".dbx", []byte(id+"\n"), 0644)
 
 		fmt.Printf("✓ Project created: %s\n", name)
 		fmt.Printf("  ID: %s\n", id)
-		fmt.Printf("  Saved to ~/.dbx/config.yaml and .dbx\n")
+		fmt.Printf("  .dbx written to current directory\n")
 		fmt.Printf("\nYou can now run dbx commands without -p flag.\n")
 	},
 }
@@ -74,16 +57,6 @@ var projectUseCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		name := args[0]
-
-		// look up by name in local config first
-		if globalConfig != nil {
-			if p, ok := globalConfig.Projects[name]; ok {
-				os.WriteFile(".dbx", []byte(p.ID+"\n"), 0644)
-				fmt.Printf("✓ Active project: %s (%s)\n", name, p.ID)
-				fmt.Printf("  .dbx written to current directory\n")
-				return
-			}
-		}
 
 		// look up by name from server
 		resp, err := doGet(fmt.Sprintf("%s/projects", serverURL()))

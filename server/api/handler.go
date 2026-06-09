@@ -228,6 +228,11 @@ func (s *Server) createBranch(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	detail := "from main"
+	if parentBranch != "" {
+		detail = "from branch " + parentBranch
+	}
+	s.store.LogEvent(ctx, branch.ID, "created", detail)
 
 	// set TTL if requested (support "7d" shorthand in addition to Go durations)
 	if req.TTL != "" {
@@ -294,11 +299,13 @@ func (s *Server) rebaseBranch(c *gin.Context) {
 
 	if len(result.Conflicts) > 0 {
 		s.store.SaveConflicts(ctx, branch.ID, result.Conflicts)
+		s.store.LogEvent(ctx, branch.ID, "conflict_detected", fmt.Sprintf("%d conflict(s)", len(result.Conflicts)))
 		c.JSON(http.StatusConflict, gin.H{"conflicts": result.Conflicts})
 		return
 	}
 
 	s.store.UpdateBranchLSN(ctx, branch.ID, result.NewLSN)
+	s.store.LogEvent(ctx, branch.ID, "rebased", "")
 	c.JSON(http.StatusOK, gin.H{"rebased": true, "new_lsn": result.NewLSN})
 }
 
@@ -333,6 +340,7 @@ func (s *Server) rebaseContinue(c *gin.Context) {
 
 	s.store.ClearConflicts(ctx, branch.ID)
 	s.store.UpdateBranchLSN(ctx, branch.ID, newLSN)
+	s.store.LogEvent(ctx, branch.ID, "conflict_resolved", "")
 	c.JSON(http.StatusOK, gin.H{"rebased": true, "new_lsn": newLSN})
 }
 
@@ -358,6 +366,7 @@ func (s *Server) mergeBranch(c *gin.Context) {
 		return
 	}
 
+	s.store.LogEvent(ctx, branch.ID, "merged", "into main")
 	// stop branch PG so its port is freed for future branches
 	core.StopBranch(branch)
 	s.store.DeleteBranch(ctx, branch.ID)
@@ -443,4 +452,26 @@ func (s *Server) statusBranch(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, status)
+}
+
+func (s *Server) branchLog(c *gin.Context) {
+	ctx := c.Request.Context()
+	projectID := c.Param("projectID")
+	name := c.Param("name")
+
+	branch, err := s.store.GetBranch(ctx, projectID, name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "branch not found"})
+		return
+	}
+
+	events, err := s.store.GetBranchLog(ctx, branch.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if events == nil {
+		events = []*db.BranchEvent{}
+	}
+	c.JSON(http.StatusOK, gin.H{"branch": name, "events": events})
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -347,6 +348,72 @@ var branchStatusCmd = &cobra.Command{
 	},
 }
 
+var branchLogCmd = &cobra.Command{
+	Use:   "log <name>",
+	Short: "Show event history of a branch",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		name := args[0]
+		pid := mustProjectID()
+
+		resp, err := doGet(fmt.Sprintf("%s/projects/%s/branches/%s/log", serverURL(), pid, name))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		defer resp.Body.Close()
+
+		var result map[string]any
+		json.NewDecoder(resp.Body).Decode(&result)
+
+		if errMsg, ok := result["error"].(string); ok {
+			fmt.Fprintf(os.Stderr, "error: %s\n", errMsg)
+			os.Exit(1)
+		}
+
+		events, _ := result["events"].([]any)
+		if len(events) == 0 {
+			fmt.Printf("  no events for branch %s\n", name)
+			return
+		}
+
+		fmt.Printf("  Log for branch: %s\n\n", name)
+		for _, raw := range events {
+			e, _ := raw.(map[string]any)
+			event := fmt.Sprintf("%v", e["event"])
+			detail, _ := e["detail"].(string)
+			ts, _ := e["created_at"].(string)
+
+			// parse and format time
+			timeStr := ts
+			if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+				timeStr = t.Format("2006-01-02 15:04:05")
+			}
+
+			icon := eventIcon(event)
+			line := fmt.Sprintf("  %s  %-20s  %s", timeStr, icon+" "+event, detail)
+			fmt.Println(strings.TrimRight(line, " "))
+		}
+	},
+}
+
+func eventIcon(event string) string {
+	switch event {
+	case "created":
+		return "✦"
+	case "rebased":
+		return "↑"
+	case "conflict_detected":
+		return "✗"
+	case "conflict_resolved":
+		return "✓"
+	case "merged":
+		return "⇒"
+	default:
+		return "·"
+	}
+}
+
 func init() {
 	branchCreateCmd.Flags().StringVar(&createFrom, "from", "", "Branch from another branch (default: main)")
 	branchCreateCmd.Flags().StringVar(&createTTL, "ttl", "", "Auto-delete after duration, e.g. 24h, 7d")
@@ -359,6 +426,7 @@ func init() {
 		branchRebaseCmd,
 		branchMergeCmd,
 		branchDeleteCmd,
+		branchLogCmd,
 	)
 	rootCmd.AddCommand(branchCmd)
 }
