@@ -66,6 +66,29 @@ func (s *Server) reapExpiredBranches(ctx context.Context) {
 
 	// fire ttl_warning for branches expiring in < 24h
 	s.fireTTLWarnings(ctx)
+	// fire behind_main for branches that have fallen behind
+	s.fireBehindMainWebhooks(ctx)
+}
+
+func (s *Server) fireBehindMainWebhooks(ctx context.Context) {
+	projects, err := s.store.ListProjects(ctx, "")
+	if err != nil {
+		return
+	}
+	for _, project := range projects {
+		branches, err := s.store.ListBranches(ctx, project.ID)
+		if err != nil {
+			continue
+		}
+		for _, branch := range branches {
+			status, err := core.BranchStatus(ctx, project.ConnString, branch)
+			if err != nil || !status.BehindMain {
+				continue
+			}
+			detail := fmt.Sprintf("%d change(s) in main", status.PendingMain)
+			s.fireWebhooks(ctx, project.ID, project.Name, branch.Name, "behind_main", detail)
+		}
+	}
 }
 
 func (s *Server) fireTTLWarnings(ctx context.Context) {
