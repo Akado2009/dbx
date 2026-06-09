@@ -75,7 +75,7 @@ var projectUseCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		name := args[0]
 
-		// look up by name in config
+		// look up by name in local config first
 		if globalConfig != nil {
 			if p, ok := globalConfig.Projects[name]; ok {
 				os.WriteFile(".dbx", []byte(p.ID+"\n"), 0644)
@@ -85,10 +85,30 @@ var projectUseCmd = &cobra.Command{
 			}
 		}
 
-		// maybe name is actually an ID
-		os.WriteFile(".dbx", []byte(name+"\n"), 0644)
-		fmt.Printf("✓ Active project set to: %s\n", name)
-		fmt.Printf("  .dbx written to current directory\n")
+		// look up by name from server
+		resp, err := doGet(fmt.Sprintf("%s/projects", serverURL()))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error fetching projects: %v\n", err)
+			os.Exit(1)
+		}
+		defer resp.Body.Close()
+		var projects []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		json.NewDecoder(resp.Body).Decode(&projects)
+		for _, p := range projects {
+			if p.Name == name {
+				os.WriteFile(".dbx", []byte(p.ID+"\n"), 0644)
+				fmt.Printf("✓ Active project set to: %s (%s)\n", name, p.ID)
+				fmt.Printf("  .dbx written to current directory\n")
+				return
+			}
+		}
+
+		fmt.Fprintf(os.Stderr, "error: project %q not found\n", name)
+		fmt.Fprintf(os.Stderr, "  run: dbx project ls\n")
+		os.Exit(1)
 	},
 }
 
