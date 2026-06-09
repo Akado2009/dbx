@@ -59,4 +59,9 @@ func (s *Server) routes() {
 	s.router.GET("/projects/:projectID/branches/:name/diff", s.diffBranch)
 	s.router.GET("/projects/:projectID/branches/:name/status", s.statusBranch)
 	s.router.GET("/projects/:projectID/branches/:name/log", s.branchLog)
+
+	// webhooks
+	s.router.GET("/projects/:projectID/webhooks", s.listWebhooks)
+	s.router.POST("/projects/:projectID/webhooks", s.createWebhook)
+	s.router.DELETE("/projects/:projectID/webhooks/:webhookID", s.deleteWebhook)
 }

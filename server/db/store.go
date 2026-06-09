@@ -64,6 +64,14 @@ func (s *Store) Migrate(ctx context.Context) error {
 			created_at  TIMESTAMPTZ DEFAULT now(),
 			UNIQUE(project_id, name)
 		);
+		CREATE TABLE IF NOT EXISTS webhooks (
+			id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+			project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			url        TEXT NOT NULL,
+			events     JSONB NOT NULL DEFAULT '[]',
+			created_at TIMESTAMPTZ DEFAULT now()
+		);
+
 		CREATE TABLE IF NOT EXISTS branch_events (
 			id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
 			branch_id  TEXT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
@@ -318,6 +326,76 @@ func (s *Store) ListExpiredBranches(ctx context.Context) ([]*Branch, error) {
 	return branches, nil
 }
 
+// --- Webhooks ---
+
+type Webhook struct {
+	ID        string    `json:"id"`
+	ProjectID string    `json:"project_id"`
+	URL       string    `json:"url"`
+	Events    []string  `json:"events"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (s *Store) CreateWebhook(ctx context.Context, projectID, url string, events []string) (*Webhook, error) {
+	data, _ := json.Marshal(events)
+	w := &Webhook{ProjectID: projectID, URL: url, Events: events}
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO webhooks (project_id, url, events) VALUES ($1, $2, $3) RETURNING id, created_at`,
+		projectID, url, string(data),
+	).Scan(&w.ID, &w.CreatedAt)
+	return w, err
+}
+
+func (s *Store) ListWebhooks(ctx context.Context, projectID string) ([]*Webhook, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, url, events, created_at FROM webhooks WHERE project_id = $1 ORDER BY created_at`,
+		projectID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var webhooks []*Webhook
+	for rows.Next() {
+		w := &Webhook{ProjectID: projectID}
+		var eventsJSON []byte
+		rows.Scan(&w.ID, &w.URL, &eventsJSON, &w.CreatedAt)
+		json.Unmarshal(eventsJSON, &w.Events)
+		webhooks = append(webhooks, w)
+	}
+	return webhooks, nil
+}
+
+func (s *Store) DeleteWebhook(ctx context.Context, id, projectID string) error {
+	_, err := s.pool.Exec(ctx,
+		`DELETE FROM webhooks WHERE id = $1 AND project_id = $2`,
+		id, projectID,
+	)
+	return err
+}
+
+// ListWebhooksForEvent returns webhooks subscribed to the given event across all projects.
+func (s *Store) ListWebhooksForProject(ctx context.Context, projectID, event string) ([]*Webhook, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, url, events, created_at FROM webhooks
+		 WHERE project_id = $1 AND events @> $2::jsonb`,
+		projectID, `["`+event+`"]`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var webhooks []*Webhook
+	for rows.Next() {
+		w := &Webhook{ProjectID: projectID}
+		var eventsJSON []byte
+		rows.Scan(&w.ID, &w.URL, &eventsJSON, &w.CreatedAt)
+		json.Unmarshal(eventsJSON, &w.Events)
+		webhooks = append(webhooks, w)
+	}
+	return webhooks, nil
+}
+
 // --- Branch events (log) ---
 
 type BranchEvent struct {
@@ -352,6 +430,26 @@ func (s *Store) GetBranchLog(ctx context.Context, branchID string) ([]*BranchEve
 		events = append(events, e)
 	}
 	return events, nil
+}
+
+func (s *Store) ListBranchesExpiringWithin(ctx context.Context, d time.Duration) ([]*Branch, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT b.id, b.name, b.project_id, b.parent_lsn, b.pg_port, b.pg_data_dir, b.slot_name, b.status, COALESCE(b.parent_branch, ''), b.expires_at
+		 FROM branches b
+		 WHERE b.expires_at IS NOT NULL AND b.expires_at > now() AND b.expires_at < now() + $1`,
+		d,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var branches []*Branch
+	for rows.Next() {
+		b := &Branch{}
+		rows.Scan(&b.ID, &b.Name, &b.ProjectID, &b.ParentLSN, &b.PgPort, &b.PgDataDir, &b.SlotName, &b.Status, &b.ParentBranch, &b.ExpiresAt)
+		branches = append(branches, b)
+	}
+	return branches, nil
 }
 
 func (s *Store) NextFreePort(ctx context.Context) (int, error) {

@@ -238,6 +238,17 @@
   </div>
 </div>
 
+<!-- Log Modal -->
+<div class="modal-overlay hidden" id="log-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="log-modal-title">Branch Log</h3>
+      <button class="modal-close" onclick="closeModal('log-modal')">×</button>
+    </div>
+    <div class="modal-body" id="log-modal-body"></div>
+  </div>
+</div>
+
 <div class="toast-container" id="toast-container"></div>
 
 <script>
@@ -409,6 +420,7 @@
         <td>
           <div class="actions">
             <button class="btn btn-ghost btn-sm" onclick="showDiff('${b.name}')">Diff</button>
+            <button class="btn btn-ghost btn-sm" onclick="showLog('${b.name}')">Log</button>
             <button class="btn btn-ghost btn-sm" onclick="rebase('${b.name}')">Rebase</button>
             ${b.status === 'conflict' ? `<button class="btn btn-warn btn-sm" onclick="rebaseContinue('${b.name}')">Continue</button>` : ''}
             <button class="btn btn-primary btn-sm" onclick="merge('${b.name}')">Merge</button>
@@ -452,6 +464,53 @@
   }
 
   // --- Diff ---
+  async function showLog(name) {
+    document.getElementById('log-modal-title').textContent = `log: ${name}`;
+    document.getElementById('log-modal-body').innerHTML = `<div style="padding:24px;color:#8b949e">Loading…</div>`;
+    openModal('log-modal');
+
+    const res = await apiFetch(`${API}/projects/${currentProject.id}/branches/${name}/log`);
+    const data = await res.json();
+    const events = data.events || [];
+
+    if (!events.length) {
+      document.getElementById('log-modal-body').innerHTML = `<div style="padding:24px;color:#8b949e">No events yet.</div>`;
+      return;
+    }
+
+    const icons = {
+      created: '✦',
+      rebased: '↑',
+      conflict_detected: '✗',
+      conflict_resolved: '✓',
+      merged: '⇒',
+    };
+    const colors = {
+      created: '#58a6ff',
+      rebased: '#3fb950',
+      conflict_detected: '#f85149',
+      conflict_resolved: '#3fb950',
+      merged: '#a371f7',
+    };
+
+    document.getElementById('log-modal-body').innerHTML = `
+      <div style="padding:8px 0">
+        ${events.map(e => {
+          const icon = icons[e.event] || '·';
+          const color = colors[e.event] || '#8b949e';
+          const ts = new Date(e.created_at).toLocaleString();
+          const detail = e.detail ? `<span style="color:#8b949e;margin-left:8px">${e.detail}</span>` : '';
+          return `
+            <div style="display:flex;align-items:center;gap:14px;padding:10px 24px;border-bottom:1px solid #21262d">
+              <span style="font-size:16px;color:${color};width:20px;text-align:center">${icon}</span>
+              <span style="color:${color};font-weight:600;width:160px;font-size:13px">${e.event}</span>
+              <span style="color:#8b949e;font-size:12px;width:150px">${ts}</span>
+              ${detail}
+            </div>`;
+        }).join('')}
+      </div>`;
+  }
+
   async function showDiff(name) {
     document.getElementById('diff-modal-title').textContent = `diff: ${name}`;
     document.getElementById('diff-modal-body').innerHTML = `<div class="flex items-center gap-8" style="padding:24px"><div class="spinner"></div> Loading…</div>`;

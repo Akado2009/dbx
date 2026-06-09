@@ -63,4 +63,25 @@ func (s *Server) reapExpiredBranches(ctx context.Context) {
 		s.store.DeleteBranch(ctx, branch.ID)
 		log.Printf("[ttl] deleted branch %s", branch.Name)
 	}
+
+	// fire ttl_warning for branches expiring in < 24h
+	s.fireTTLWarnings(ctx)
+}
+
+func (s *Server) fireTTLWarnings(ctx context.Context) {
+	branches, err := s.store.ListBranchesExpiringWithin(ctx, 24*time.Hour)
+	if err != nil {
+		return
+	}
+	for _, branch := range branches {
+		project, err := s.store.GetProject(ctx, branch.ProjectID)
+		if err != nil {
+			continue
+		}
+		detail := ""
+		if branch.ExpiresAt != nil {
+			detail = fmt.Sprintf("expires in %s", time.Until(*branch.ExpiresAt).Round(time.Minute))
+		}
+		s.fireWebhooks(ctx, project.ID, project.Name, branch.Name, "ttl_warning", detail)
+	}
 }

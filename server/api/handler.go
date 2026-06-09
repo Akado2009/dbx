@@ -233,6 +233,7 @@ func (s *Server) createBranch(c *gin.Context) {
 		detail = "from branch " + parentBranch
 	}
 	s.store.LogEvent(ctx, branch.ID, "created", detail)
+	go s.fireWebhooks(ctx, project.ID, project.Name, branch.Name, "created", detail)
 
 	// set TTL if requested (support "7d" shorthand in addition to Go durations)
 	if req.TTL != "" {
@@ -300,6 +301,7 @@ func (s *Server) rebaseBranch(c *gin.Context) {
 	if len(result.Conflicts) > 0 {
 		s.store.SaveConflicts(ctx, branch.ID, result.Conflicts)
 		s.store.LogEvent(ctx, branch.ID, "conflict_detected", fmt.Sprintf("%d conflict(s)", len(result.Conflicts)))
+		go s.fireWebhooks(ctx, project.ID, project.Name, branch.Name, "conflict", fmt.Sprintf("%d conflict(s)", len(result.Conflicts)))
 		c.JSON(http.StatusConflict, gin.H{"conflicts": result.Conflicts})
 		return
 	}
@@ -367,6 +369,7 @@ func (s *Server) mergeBranch(c *gin.Context) {
 	}
 
 	s.store.LogEvent(ctx, branch.ID, "merged", "into main")
+	go s.fireWebhooks(ctx, project.ID, project.Name, branch.Name, "merged", "")
 	// stop branch PG so its port is freed for future branches
 	core.StopBranch(branch)
 	s.store.DeleteBranch(ctx, branch.ID)
@@ -452,6 +455,64 @@ func (s *Server) statusBranch(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, status)
+}
+
+// --- Webhooks ---
+
+func (s *Server) listWebhooks(c *gin.Context) {
+	ctx := c.Request.Context()
+	projectID := c.Param("projectID")
+	webhooks, err := s.store.ListWebhooks(ctx, projectID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if webhooks == nil {
+		webhooks = []*db.Webhook{}
+	}
+	c.JSON(http.StatusOK, webhooks)
+}
+
+func (s *Server) createWebhook(c *gin.Context) {
+	ctx := c.Request.Context()
+	projectID := c.Param("projectID")
+
+	var req struct {
+		URL    string   `json:"url" binding:"required"`
+		Events []string `json:"events" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// validate events
+	valid := map[string]bool{"conflict": true, "merged": true, "behind_main": true, "ttl_warning": true, "created": true}
+	for _, e := range req.Events {
+		if !valid[e] {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unknown event: " + e})
+			return
+		}
+	}
+
+	wh, err := s.store.CreateWebhook(ctx, projectID, req.URL, req.Events)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, wh)
+}
+
+func (s *Server) deleteWebhook(c *gin.Context) {
+	ctx := c.Request.Context()
+	projectID := c.Param("projectID")
+	webhookID := c.Param("webhookID")
+
+	if err := s.store.DeleteWebhook(ctx, webhookID, projectID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
 func (s *Server) branchLog(c *gin.Context) {
